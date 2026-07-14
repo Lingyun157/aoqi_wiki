@@ -1,0 +1,900 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>奥奇传说智能体</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="app" v-cloak>
+        <aside class="sidebar" :class="{ collapsed: sidebarCollapsed }">
+            <div class="sidebar-header">
+                <div class="brand">
+                    <div class="brand-mark"><img src="/assets/logo.png" alt="Aoqi"></div>
+                    <div class="brand-text" v-if="!sidebarCollapsed">
+                        <span class="brand-title">Aoqi</span>
+                        <span class="brand-sub">Agent</span>
+                    </div>
+                </div>
+                <button class="sidebar-toggle" @click="sidebarCollapsed = !sidebarCollapsed">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8L10 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                </button>
+            </div>
+
+            <nav class="nav">
+                <button v-for="item in navItems" :key="item.id"
+                        class="nav-item" :class="{ active: currentPage === item.id }"
+                        @click="currentPage = item.id">
+                    <svg class="nav-icon" width="20" height="20" viewBox="0 0 20 20" fill="none" v-html="item.icon"></svg>
+                    <span class="nav-label" v-if="!sidebarCollapsed">{{ item.label }}</span>
+                </button>
+            </nav>
+
+            <div class="sidebar-user" v-if="!sidebarCollapsed">
+                <template v-if="currentUser">
+                    <div class="user-info">
+                        <div class="user-avatar" style="position:relative;" @click="uploadAvatar" title="点击更换头像">
+                            <img v-if="currentUser.avatar" :src="currentUser.avatar" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">
+                            <span v-else>{{ currentUser.username[0] }}</span>
+                            <span class="avatar-upload-hint" v-if="!avatarUploading">📷</span>
+                            <span class="avatar-upload-hint" v-else>⏳</span>
+                        </div>
+                        <div class="user-detail">
+                            <div class="user-name" @click="openUserProfile(currentUser.id)" style="cursor:pointer;">{{ currentUser.username }}</div>
+                            <div class="user-role">
+                                <span v-if="currentUser.role === 'super_admin'" class="role-badge role-super">超级管理员</span>
+                                <span v-else-if="currentUser.role === 'admin'" class="role-badge role-admin">管理员</span>
+                                <span v-else class="role-badge role-user">普通用户</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="sidebar-actions">
+                        <button class="sidebar-action-btn" @click="showNotifications = !showNotifications" title="通知">
+                            🔔<span class="notif-badge" v-if="unreadCount > 0">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
+                        </button>
+                        <button class="sidebar-action-btn" @click="showPasswordModal = true" title="修改密码">🔑</button>
+                        <button class="sidebar-action-btn" @click="toggleDarkMode" :title="darkMode ? '浅色模式' : '暗色模式'">{{ darkMode ? '☀️' : '🌙' }}</button>
+                        <button class="sidebar-action-btn" @click="compareMode = !compareMode; exitCompareMode()" title="精灵对比">⚖️</button>
+                        <button class="sidebar-action-btn" v-if="checkIsAdmin()" @click="showAdminPanel = true; loadAdminUsers(1)" title="管理面板">🛡️</button>
+                        <button class="sidebar-action-btn" v-if="checkIsSuperAdmin()" @click="showAuditLogs = true; loadAuditLogs(1)" title="操作日志">📋</button>
+                        <button class="sidebar-action-btn" v-if="checkIsSuperAdmin()" @click="showFormationSim = true" title="阵容模拟">🎮</button>
+                        <button class="sidebar-action-btn" v-if="checkIsSuperAdmin()" @click="backupDatabase" title="数据库备份">💾</button>
+                    </div>
+                    <button class="logout-btn" @click="logout">退出</button>
+                </template>
+                <template v-else>
+                    <div class="auth-buttons">
+                        <button class="btn btn-primary btn-sm" @click="openLogin">登录</button>
+                        <button class="btn btn-outline btn-sm" @click="openRegister">注册</button>
+                    </div>
+                    <div class="sidebar-actions" style="margin-top:8px;">
+                        <button class="sidebar-action-btn" @click="toggleDarkMode" :title="darkMode ? '浅色模式' : '暗色模式'">{{ darkMode ? '☀️' : '🌙' }}</button>
+                    </div>
+                </template>
+            </div>
+
+            <div class="sidebar-footer" v-if="!sidebarCollapsed">
+                <div class="stats-grid">
+                    <div class="stat">
+                        <span class="stat-value">{{ stats.totalPets }}</span>
+                        <span class="stat-label">精灵</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-value">{{ stats.totalChallenges }}</span>
+                        <span class="stat-label">挑战</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-value">{{ stats.totalElements }}</span>
+                        <span class="stat-label">属性</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-value">{{ stats.totalVideos || 0 }}</span>
+                        <span class="stat-label">视频</span>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <main class="main">
+            <!-- 精灵查询 -->
+            <section v-show="currentPage === 'pets'" class="page">
+                <div class="page-top">
+                    <h1 class="page-title">精灵查询</h1>
+                    <div class="search-row">
+                        <select class="select" v-model="petElement" @change="debouncedElementFilter">
+                            <option value="">全部属性</option>
+                            <option v-for="elem in petElements" :key="elem" :value="elem">{{ elem }}</option>
+                        </select>
+                        <input class="input" v-model="petSearch" @input="debouncedSearchPets" @keydown.enter="searchPets(1)" placeholder="输入精灵名字或ID">
+                        <button class="btn" @click="searchPets(1)">搜索</button>
+                        <button class="btn" :class="{ 'btn-accent': compareMode }" @click="compareMode = !compareMode; exitCompareMode()">⚖️ 对比</button>
+                    </div>
+                </div>
+                <div class="pet-grid">
+                    <div class="pet-card" v-for="pet in petList" :key="pet.raceId" @click="compareMode ? toggleComparePet(pet) : openPetDetail(pet.raceId)" :class="{ 'pet-card-selected': comparePets.some(p => p.raceId === pet.raceId) }">
+                        <div class="pet-card-compare-check" v-if="compareMode">
+                            <span v-if="comparePets.some(p => p.raceId === pet.raceId)">✓</span>
+                        </div>
+                        <div class="pet-card-icon">
+                            <img :data-src="'/images/peticon/' + pet.raceId" alt=""
+                                 @error="handleImgError($event, pet)"
+                                 @load="handleImgLoad($event, pet)"
+                                 :class="{ hidden: pet.iconError }">
+                            <span class="pet-placeholder" v-if="pet.iconError">{{ pet.name[0] }}</span>
+                        </div>
+                        <div class="pet-card-body">
+                            <div class="pet-card-name">{{ pet.name }}</div>
+                            <div class="pet-card-id">ID {{ pet.raceId }}</div>
+                        </div>
+                        <div class="pet-card-tags">
+                            <span class="tag tag-elem">{{ pet.elementTypeName }}</span>
+                            <span class="tag tag-job">{{ pet.jobCategory }}</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="pagination" v-if="petTotal > petPageSize">
+                    <button class="page-btn" :disabled="petPage <= 1" @click="searchPets(petPage - 1)">Prev</button>
+                    <span class="page-info">{{ petPage }} / {{ Math.ceil(petTotal / petPageSize) }}</span>
+                    <button class="page-btn" :disabled="petPage >= Math.ceil(petTotal / petPageSize)" @click="searchPets(petPage + 1)">Next</button>
+                </div>
+                <!-- Compare Bar -->
+                <div class="compare-bar" v-if="compareMode && comparePets.length > 0">
+                    <div class="compare-bar-items">
+                        <div class="compare-bar-item" v-for="pet in comparePets" :key="pet.raceId">
+                            <span>{{ pet.name }}</span>
+                            <button class="compare-remove-btn" @click="toggleComparePet(pet)">×</button>
+                        </div>
+                    </div>
+                    <div class="compare-bar-actions">
+                        <button class="btn btn-sm" @click="exitCompareMode">取消</button>
+                        <button class="btn btn-accent btn-sm" @click="doCompare" :disabled="comparePets.length < 2">开始对比</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 属性克制 -->
+            <section v-show="currentPage === 'elements'" class="page">
+                <div class="page-top">
+                    <h1 class="page-title">属性克制</h1>
+                    <div class="search-row">
+                        <input class="input" v-model="elementSearch" @keydown.enter="queryElement" placeholder="输入属性名，如 神火">
+                        <button class="btn" @click="queryElement">查询</button>
+                    </div>
+                </div>
+                <div class="element-result" v-if="elementData">
+                    <div class="element-header">
+                        <h2>{{ elementData.element }}</h2>
+                    </div>
+                    <div class="element-cols">
+                        <div class="element-col" v-if="elementData.counters.length">
+                            <h3 class="col-title counter-title">克制</h3>
+                            <div class="relation-list">
+                                <div class="relation-row" v-for="c in elementData.counters" :key="c.element">
+                                    <span>{{ c.element }}</span>
+                                    <span class="mult mult-up">{{ c.multiplier }}x</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="element-col" v-if="elementData.weaknesses.length">
+                            <h3 class="col-title weakness-title">被克制</h3>
+                            <div class="relation-list">
+                                <div class="relation-row" v-for="w in elementData.weaknesses" :key="w.element">
+                                    <span>{{ w.element }}</span>
+                                    <span class="mult mult-down">{{ w.multiplier }}x</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="empty" v-else>
+                    <p>输入属性名查看克制关系</p>
+                </div>
+                <div class="table-section">
+                    <h3 class="section-title">神属性克制表</h3>
+                    <div class="table-wrap">
+                        <table class="elem-table" v-if="godElements.length">
+                            <thead>
+                                <tr>
+                                    <th></th>
+                                    <th v-for="g in godElements" :key="g.id">{{ g.name }}</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="(row, ri) in elementMatrix" :key="ri">
+                                    <th>{{ godElements[ri].name }}</th>
+                                    <td v-for="(cell, ci) in row" :key="ci"
+                                        :class="{'cell-up': cell > 1, 'cell-down': cell < 1, 'cell-neutral': cell === 1}">
+                                        {{ cell }}
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 挑战活动 -->
+            <section v-show="currentPage === 'challenges'" class="page">
+                <div class="page-top">
+                    <h1 class="page-title">挑战活动</h1>
+                    <div class="search-row">
+                        <input class="input" v-model="challengeSearch" @keydown.enter="searchChallenges" placeholder="搜索挑战活动">
+                        <button class="btn" @click="searchChallenges">搜索</button>
+                    </div>
+                </div>
+                <div class="challenge-grid">
+                    <div class="challenge-card" v-for="ch in challengeList" :key="ch.id" @click="openChallengeDetail(ch.name)">
+                        <div class="challenge-name">{{ ch.name }}</div>
+                        <div class="challenge-meta">
+                            <span>{{ ch.date }}</span>
+                            <span>{{ ch.levelCount }} 关</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 攻略专区 -->
+            <section v-show="currentPage === 'videos'" class="page">
+                <!-- 文件夹视图 -->
+                <div v-if="!selectedSpiritFolder">
+                    <div class="page-top">
+                        <h1 class="page-title">攻略专区</h1>
+                        <div class="search-row">
+                            <input class="input" v-model="spiritFolderSearch" @input="filterSpiritFolders" placeholder="搜索灵初精灵名称或ID">
+                        </div>
+                    </div>
+                    <div class="folder-section-title">灵初精灵</div>
+                    <div class="folder-list">
+                        <div class="folder-item" v-for="pet in filteredSpiritFolders" :key="pet.raceId" @click="openSpiritFolder(pet)">
+                            <div class="folder-icon">
+                                <img :src="'/images/peticon/' + pet.raceId" alt=""
+                                     @error="handleFolderImgError($event, pet)"
+                                     @load="handleFolderImgLoad($event, pet)"
+                                     :class="{ hidden: pet.iconError }">
+                                <span class="folder-placeholder" v-if="pet.iconError">{{ pet.name[0] }}</span>
+                            </div>
+                            <div class="folder-info">
+                                <div class="folder-name">{{ pet.name }}</div>
+                                <div class="folder-id">ID {{ pet.raceId }}</div>
+                            </div>
+                            <div class="folder-item-right">
+                                <div class="folder-item-tags">
+                                    <span class="tag tag-elem">{{ pet.elementTypeName }}</span>
+                                    <span class="tag tag-job">{{ pet.jobCategory }}</span>
+                                </div>
+                                <div class="folder-badge" v-if="pet.videoCount > 0">{{ pet.videoCount }}</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="empty" v-if="filteredSpiritFolders.length === 0">
+                        <p>未找到匹配的精灵</p>
+                    </div>
+                </div>
+
+                <!-- 精灵文件夹详情视图 -->
+                <div v-else class="folder-detail">
+                    <div class="folder-detail-header">
+                        <button class="btn btn-back" @click="closeSpiritFolder">
+                            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8L10 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                            返回
+                        </button>
+                        <div class="folder-detail-spirit">
+                            <div class="folder-detail-icon">
+                                <img :src="'/images/peticon/' + selectedSpiritFolder.raceId" alt=""
+                                     @error="handleFolderImgError($event, selectedSpiritFolder)"
+                                     @load="handleFolderImgLoad($event, selectedSpiritFolder)"
+                                     :class="{ hidden: selectedSpiritFolder.iconError }">
+                                <span class="pet-placeholder lg" v-if="selectedSpiritFolder.iconError">{{ selectedSpiritFolder.name[0] }}</span>
+                            </div>
+                            <div>
+                                <h2 class="folder-detail-name">{{ selectedSpiritFolder.name }}</h2>
+                                <div class="folder-detail-meta">
+                                    <span class="tag tag-elem">{{ selectedSpiritFolder.elementTypeName }}</span>
+                                    <span class="tag tag-job">{{ selectedSpiritFolder.jobCategory }}</span>
+                                    <span class="tag tag-id">ID {{ selectedSpiritFolder.raceId }}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="folder-detail-section">
+                        <div class="section-header">
+                            <h3>攻略列表</h3>
+                            <button class="btn btn-sm" @click="showSpiritVideoForm = !showSpiritVideoForm">
+                                {{ showSpiritVideoForm ? '取消' : '+ 添加攻略' }}
+                            </button>
+                        </div>
+                        <div v-if="showSpiritVideoForm" class="video-form">
+                            <input type="text" class="input" v-model="newVideoTitle" placeholder="视频标题" />
+                            <input type="text" class="input" v-model="newVideoUrl" placeholder="视频链接 (Bilibili等)" />
+                            <div class="video-form-row">
+                                <button class="btn btn-sm" type="button" @click="fetchBilibiliInfo" :disabled="fetchingBilibili">
+                                    {{ fetchingBilibili ? '获取中...' : '🔍 自动获取B站信息' }}
+                                </button>
+                            </div>
+                            <input type="text" class="input" v-model="newVideoAuthor" placeholder="作者（可选）" />
+                            <input type="text" class="input" v-model="newVideoNote" placeholder="备注说明（可选）" />
+                            <div class="video-form-cover">
+                                <div class="cover-preview" v-if="newVideoPic">
+                                    <img :src="newVideoPic" alt="封面预览">
+                                    <button class="btn btn-sm btn-danger cover-remove-btn" @click="newVideoPic = ''">移除封面</button>
+                                </div>
+                                <label class="btn btn-sm cover-upload-btn">
+                                    <input type="file" accept="image/*" @change="handleNewVideoCoverUpload" style="display:none;">
+                                    📷 上传封面
+                                </label>
+                            </div>
+                            <div class="video-form-levels">
+                                <div class="level-section-header">
+                                    <span>阵容关卡代码</span>
+                                    <button class="btn btn-sm" @click="addLevel">+ 新建</button>
+                                </div>
+                                <div class="level-item" v-for="(level, idx) in newVideoLevels" :key="level.id">
+                                    <div class="level-item-header">
+                                        <span>关卡 {{ idx + 1 }}</span>
+                                        <button class="btn btn-sm btn-danger" @click="removeLevel(idx)">删除</button>
+                                    </div>
+                                    <input type="text" class="input input-sm" v-model="level.name" placeholder="关卡名称（如：第1关、地狱模式）" />
+                                    <textarea class="textarea input-sm" v-model="level.code" placeholder="输入关卡代码（布阵代码）" rows="3"></textarea>
+                                </div>
+                            </div>
+                            <button class="btn btn-accent" @click="addSpiritVideo">确认添加</button>
+                        </div>
+                        <div v-if="spiritVideos.length === 0 && !showSpiritVideoForm" class="empty-inline">
+                            <p>暂无攻略视频</p>
+                            <p class="hint">点击右上角「添加攻略」手动上传</p>
+                        </div>
+                        <div class="spirit-video-list" v-else>
+                            <div class="spirit-video-item" v-for="v in spiritVideos" :key="v.bvid">
+                                <a :href="v.url" target="_blank" rel="noopener noreferrer" class="spirit-video-link">
+                                    <div class="spirit-video-cover" v-if="getVideoCover(v)">
+                                        <img :src="getVideoCover(v)" alt="" @error="v.coverError = true" @load="v.coverError = false" :class="{ hidden: v.coverError }">
+                                        <div class="spirit-video-play">
+                                            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                                        </div>
+                                    </div>
+                                    <div class="spirit-video-cover placeholder" v-else>
+                                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="5" width="14" height="10" rx="1.5"/><path d="M17 9l4-2v10l-4-2z"/></svg>
+                                    </div>
+                                    <div class="spirit-video-info">
+                                        <div class="spirit-video-title">{{ v.title }}</div>
+                                        <div class="spirit-video-meta">
+                                            <span v-if="v.author">{{ v.author }}</span>
+                                            <span v-if="v.note" class="spirit-video-note">{{ v.note }}</span>
+                                        </div>
+                                        <div class="spirit-video-tags" v-if="v.tags && v.tags.length">
+                                            <span class="tag video-tag" v-for="tag in v.tags" :key="tag">{{ tag }}</span>
+                                        </div>
+                                    </div>
+                                </a>
+                                <div class="spirit-video-actions">
+                                    <button class="btn btn-sm" @click.stop="likeVideo(selectedSpiritFolder.raceId, v.bvid || v.url)" title="点赞">👍 {{ v.likes || 0 }}</button>
+                                    <button class="btn btn-sm" @click.stop="currentVideoForComments = { raceId: selectedSpiritFolder.raceId, videoId: v.bvid || v.url }; showVideoComments = true; loadVideoComments(selectedSpiritFolder.raceId, v.bvid || v.url)" title="评论">💬 {{ v.commentCount || 0 }}</button>
+                                    <template v-if="checkCanManage(v)">
+                                        <button class="btn btn-sm" @click="showVideoCoverUpload(v)">更换封面</button>
+                                        <button class="btn btn-danger btn-sm" @click="deleteSpiritVideo(v)">删除</button>
+                                    </template>
+                                </div>
+                                <div class="spirit-video-levels" v-if="v.levels && v.levels.length > 0">
+                                    <div class="levels-header">
+                                        <span>⚔️ 关卡代码</span>
+                                    </div>
+                                    <div class="level-code-item" v-for="(level, idx) in v.levels" :key="idx">
+                                        <div class="level-code-header">
+                                            <span>{{ level.name || `关卡 ${idx + 1}` }}</span>
+                                            <button class="btn btn-sm btn-copy" @click="copyLevelCode(level.code)">📋 复制</button>
+                                        </div>
+                                        <pre class="level-code">{{ level.code }}</pre>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 讨论专区 -->
+            <section v-show="currentPage === 'forum'" class="page">
+                <div class="page-top">
+                    <h1 class="page-title">讨论专区</h1>
+                    <div class="forum-header-actions">
+                        <span class="forum-stat">总帖子 {{ forumStats.totalPosts || 0 }}</span>
+                        <span class="forum-stat">今日 {{ forumStats.todayPosts || 0 }}</span>
+                        <button class="btn btn-accent" @click="currentUser ? showPostForm = true : openLogin()">发布帖子</button>
+                    </div>
+                </div>
+
+                <div v-if="!forumDetailPost" class="forum-layout">
+                    <div class="forum-sidebar">
+                        <div class="forum-cats">
+                            <div class="forum-cat-title">分类</div>
+                            <div 
+                                class="forum-cat-item" 
+                                :class="{ active: forumCategory === '' }"
+                                @click="forumCategory = ''; searchForumPosts(1)"
+                            >全部</div>
+                            <div 
+                                v-for="cat in forumCategories" 
+                                :key="cat"
+                                class="forum-cat-item"
+                                :class="{ active: forumCategory === cat }"
+                                @click="forumCategory = cat; searchForumPosts(1)"
+                            >{{ cat }}</div>
+                        </div>
+                        <div class="forum-cats">
+                            <div class="forum-cat-title">排序</div>
+                            <div 
+                                class="forum-cat-item"
+                                :class="{ active: forumSort === 'latest' }"
+                                @click="forumSort = 'latest'; searchForumPosts(1)"
+                            >最新发布</div>
+                            <div 
+                                class="forum-cat-item"
+                                :class="{ active: forumSort === 'hot' }"
+                                @click="forumSort = 'hot'; searchForumPosts(1)"
+                            >最热</div>
+                            <div 
+                                class="forum-cat-item"
+                                :class="{ active: forumSort === 'likes' }"
+                                @click="forumSort = 'likes'; searchForumPosts(1)"
+                            >点赞最多</div>
+                        </div>
+                    </div>
+
+                    <div class="forum-main">
+                        <div class="search-row">
+                            <input class="input" v-model="forumSearch" @keydown.enter="searchForumPosts(1)" placeholder="搜索帖子标题或内容">
+                            <button class="btn" @click="searchForumPosts(1)">搜索</button>
+                        </div>
+
+                        <div class="post-list">
+                            <div class="post-card" v-for="post in forumPosts" :key="post.id">
+                                <div class="post-card-left" @click="openForumPost(post.id)">
+                                    <div class="post-avatar" @click.stop="post.userId && openUserProfile(post.userId)">{{ post.author[0] }}</div>
+                                </div>
+                                <div class="post-card-body" @click="openForumPost(post.id)">
+                                    <div class="post-card-top">
+                                        <span class="post-cat-tag">{{ post.category }}</span>
+                                        <span class="tag tag-pin" v-if="post.is_pinned">置顶</span>
+                                        <span class="tag tag-feature" v-if="post.is_featured">精华</span>
+                                        <span class="post-author">{{ post.author }}</span>
+                                        <span class="post-time">{{ formatTime(post.created_at) }}</span>
+                                    </div>
+                                    <div class="post-card-title">{{ post.title }}</div>
+                                    <div class="post-card-excerpt">{{ post.excerpt }}</div>
+                                    <div class="post-card-images" v-if="parseImages(post.images).length">
+                                        <img v-for="(img, idx) in parseImages(post.images).slice(0, 3)" :key="idx" :src="img" alt="" class="post-card-img" @click.stop="openLightbox(parseImages(post.images), idx)">
+                                        <div class="post-card-more" v-if="parseImages(post.images).length > 3">+{{ parseImages(post.images).length - 3 }}</div>
+                                    </div>
+                                    <div class="post-card-footer">
+                                        <span class="post-meta-item">👁 {{ post.views }}</span>
+                                        <span class="post-meta-item">💬 {{ post.comment_count }}</span>
+                                        <span class="post-meta-item">👍 {{ post.likes }}</span>
+                                        <span class="post-meta-item fav-btn" @click.stop="toggleFavorite(post.id)" :class="{ 'fav-active': favoritePosts.some(f => f.id === post.id) }">❤️ {{ favoritePosts.some(f => f.id === post.id) ? '已收藏' : '收藏' }}</span>
+                                    </div>
+                                </div>
+                                <div class="post-card-actions">
+                                    <button class="btn-icon" @click.stop="openReport('post', post.id)" title="举报">🚩</button>
+                                    <button class="btn-icon btn-danger" v-if="checkCanManage(post)" @click.stop="deleteForumPost(post.id)" title="删除">
+                                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 3.5h10M5.5 3.5V2h3v1.5M3.5 3.5l.7 8.5h5.6l.7-8.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div v-if="forumPosts.length === 0" class="empty-inline">
+                            <p>暂无帖子</p>
+                            <p class="hint">点击右上角「发布帖子」成为第一个发帖的人吧</p>
+                        </div>
+
+                        <div class="pagination" v-if="forumTotal > forumPageSize">
+                            <button class="page-btn" :disabled="forumPage <= 1" @click="searchForumPosts(forumPage - 1)">Prev</button>
+                            <span class="page-info">{{ forumPage }} / {{ Math.ceil(forumTotal / forumPageSize) }}</span>
+                            <button class="page-btn" :disabled="forumPage >= Math.ceil(forumTotal / forumPageSize)" @click="searchForumPosts(forumPage + 1)">Next</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div v-else class="forum-detail">
+                    <button class="btn btn-sm" @click="closeForumPost">← 返回列表</button>
+
+                    <div class="post-detail" v-if="forumDetailPost">
+                        <!-- Edit Mode -->
+                        <template v-if="editingPost === forumDetailPost.id">
+                            <div class="form-group">
+                                <label>分类</label>
+                                <select class="select" v-model="editPostCategory">
+                                    <option v-for="cat in forumCategories" :key="cat" :value="cat">{{ cat }}</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>标题</label>
+                                <input class="input" v-model="editPostTitle" style="width:100%;">
+                            </div>
+                            <div class="form-group">
+                                <label>内容</label>
+                                <textarea class="textarea" v-model="editPostContent" rows="8"></textarea>
+                            </div>
+                            <div class="modal-btns">
+                                <button class="btn" @click="cancelEditPost">取消</button>
+                                <button class="btn btn-accent" @click="saveEditPost">保存</button>
+                            </div>
+                        </template>
+                        <!-- View Mode -->
+                        <template v-else>
+                            <div class="post-detail-header">
+                                <span class="post-cat-tag">{{ forumDetailPost.category }}</span>
+                                <span class="tag tag-pin" v-if="forumDetailPost.is_pinned">置顶</span>
+                                <span class="tag tag-feature" v-if="forumDetailPost.is_featured">精华</span>
+                                <h2 class="post-detail-title">{{ forumDetailPost.title }}</h2>
+                                <div class="post-detail-meta">
+                                    <span class="post-author-link" @click="forumDetailPost.userId && openUserProfile(forumDetailPost.userId)">{{ forumDetailPost.author }}</span>
+                                    <span>{{ formatTime(forumDetailPost.created_at) }}</span>
+                                    <span>👁 {{ forumDetailPost.views }}</span>
+                                    <span @click="likeForumPost(forumDetailPost.id)" class="like-btn">👍 {{ forumDetailPost.likes }}</span>
+                                    <span class="like-btn" @click="toggleFavorite(forumDetailPost.id)" :class="{ 'fav-active': favoritePosts.some(f => f.id === forumDetailPost.id) }">❤️ {{ favoritePosts.some(f => f.id === forumDetailPost.id) ? '已收藏' : '收藏' }}</span>
+                                    <span class="like-btn" @click="openReport('post', forumDetailPost.id)">🚩 举报</span>
+                                    <span v-if="checkCanManage(forumDetailPost) || (currentUser && forumDetailPost.userId === currentUser.id)" class="like-btn" @click="startEditPost(forumDetailPost)">✏️ 编辑</span>
+                                    <span v-if="checkIsAdmin()" class="like-btn" @click="pinPost(forumDetailPost.id, !forumDetailPost.is_pinned)">{{ forumDetailPost.is_pinned ? '📌 取消置顶' : '📌 置顶' }}</span>
+                                    <span v-if="checkIsAdmin()" class="like-btn" @click="featurePost(forumDetailPost.id, !forumDetailPost.is_featured)">{{ forumDetailPost.is_featured ? '⭐ 取消精华' : '⭐ 加精' }}</span>
+                                    <span v-if="checkCanManage(forumDetailPost)" class="delete-btn" @click="deleteForumPost(forumDetailPost.id)">🗑 删除</span>
+                                </div>
+                            </div>
+                            <div class="post-detail-content">{{ forumDetailPost.content }}</div>
+                            <div class="post-detail-images" v-if="parseImages(forumDetailPost.images).length">
+                                <img v-for="(img, idx) in parseImages(forumDetailPost.images)" :key="idx" :src="img" alt="帖子图片" class="post-image" @click="openLightbox(parseImages(forumDetailPost.images), idx)">
+                            </div>
+                        </template>
+                    </div>
+
+                    <div class="comments-section">
+                        <div class="section-header">
+                            <h3>评论 ({{ forumCommentTotal }})</h3>
+                        </div>
+
+                        <div class="comment-form">
+                            <div class="reply-indicator" v-if="replyToComment">
+                                <span>回复 @{{ replyToComment.author }}</span>
+                                <button class="reply-cancel" @click="cancelReply">×</button>
+                            </div>
+                            <textarea class="textarea" v-model="newCommentContent" :placeholder="replyToComment ? `回复 @${replyToComment.author}...` : '说点什么...'"></textarea>
+                            <div class="comment-image-upload" v-if="newCommentImages.length > 0">
+                                <div class="image-preview-list small">
+                                    <div class="image-preview-item" v-for="(img, idx) in newCommentImages" :key="idx">
+                                        <img :src="img" alt="预览图">
+                                        <button class="image-remove-btn" @click="removeCommentImage(idx)">×</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="comment-form-row">
+                                <input class="input input-sm" v-model="newCommentAuthor" placeholder="昵称（可选，默认匿名）" style="max-width: 200px;">
+                                <div class="comment-form-actions">
+                                    <label class="image-upload-btn small">
+                                        <input type="file" accept="image/*" multiple @change="handleCommentImageUpload" style="display:none;">
+                                        <span v-if="uploadingCommentImage">上传中...</span>
+                                        <span v-else>📷 图片</span>
+                                    </label>
+                                    <button class="btn btn-accent" @click="submitComment">发表评论</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="comment-list">
+                            <div class="comment-item" v-for="c in forumComments" :key="c.id">
+                                <div class="comment-avatar" @click="c.userId && openUserProfile(c.userId)" style="cursor:pointer;">{{ c.author[0] }}</div>
+                                <div class="comment-body">
+                                    <div class="comment-header">
+                                        <span class="comment-author">{{ c.author }}</span>
+                                        <span class="comment-time">{{ formatTime(c.created_at) }}</span>
+                                        <span v-if="c.parent_author" class="comment-reply-to">回复 @{{ c.parent_author }}</span>
+                                    </div>
+                                    <div class="comment-content">{{ c.content }}</div>
+                                    <div class="comment-images" v-if="parseImages(c.images).length">
+                                        <img v-for="(img, idx) in parseImages(c.images)" :key="idx" :src="img" alt="评论图片" class="comment-image" @click="openLightbox(parseImages(c.images), idx)">
+                                    </div>
+                                    <div class="comment-footer">
+                                        <span class="comment-like" @click="likeForumComment(c.id)">👍 {{ c.likes }}</span>
+                                        <span class="comment-like" @click="setReplyTo(c)">💬 回复</span>
+                                        <span class="comment-like" @click="openReport('comment', c.id)">🚩 举报</span>
+                                        <span v-if="checkCanManage(c)" class="delete-btn-small" @click="deleteForumComment(c.id)">删除</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 精灵详情弹窗 -->
+            <div class="overlay" v-if="petDetail" @click.self="closePetDetail">
+                <div class="modal">
+                    <button class="modal-close" @click="closePetDetail">
+                        <svg width="14" height="14" viewBox="0 0 14 14"><path d="M1 1L13 13M13 1L1 13" stroke="currentColor" stroke-width="1.5"/></svg>
+                    </button>
+                    <div class="modal-hero">
+                        <div class="modal-icon">
+                            <img :src="'/images/peticon/' + petDetail.raceId" alt="" 
+                                 @error="handleImgError($event, petDetail)" 
+                                 @load="handleImgLoad($event, petDetail)"
+                                 :class="{ hidden: petDetail.iconError }">
+                            <span class="pet-placeholder lg" v-if="petDetail.iconError">{{ petDetail.name[0] }}</span>
+                        </div>
+                        <div>
+                            <h2 class="modal-name">{{ petDetail.name }}</h2>
+                            <div class="modal-tags">
+                                <span class="tag tag-elem">{{ petDetail.elementTypeName }}</span>
+                                <span class="tag tag-job">{{ petDetail.jobCategory }}</span>
+                                <span class="tag tag-id">ID {{ petDetail.raceId }}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-section">
+                        <h3>技能</h3>
+                        <div class="skill" v-for="s in petDetail.skills" :key="s.name">
+                            <div class="skill-type">{{ s.type }}</div>
+                            <div class="skill-body">
+                                <div class="skill-name">{{ s.name }}</div>
+                                <div class="skill-desc">{{ s.description }}</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-section" v-if="petDetail.tianmingSkill && petDetail.tianmingSkill.name">
+                        <h3>天命技</h3>
+                        <div class="skill">
+                            <div class="skill-type tianming">天命</div>
+                            <div class="skill-body">
+                                <div class="skill-name">{{ petDetail.tianmingSkill.name }}</div>
+                                <div class="skill-desc">{{ petDetail.tianmingSkill.description }}</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-section" v-if="petDetail.relatedBuffs && petDetail.relatedBuffs.length">
+                        <h3>相关 Buff</h3>
+                        <div class="buff-list">
+                            <div class="buff-item" v-for="b in petDetail.relatedBuffs" :key="b.name">
+                                <div class="buff-name">{{ b.name }}</div>
+                                <div class="buff-desc" v-if="b.description">{{ b.description }}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- 更换封面弹窗 -->
+            <div class="overlay" v-if="showCoverUploadModal" @click.self="closeCoverUploadModal">
+                <div class="modal">
+                    <button class="modal-close" @click="closeCoverUploadModal">
+                        <svg width="14" height="14" viewBox="0 0 14 14"><path d="M1 1L13 13M13 1L1 13" stroke="currentColor" stroke-width="1.5"/></svg>
+                    </button>
+                    <h2 class="modal-name">更换封面</h2>
+                    <div class="form-group">
+                        <label>当前封面</label>
+                        <div class="cover-preview-large" v-if="editingVideo && getVideoCover(editingVideo)">
+                            <img :src="getVideoCover(editingVideo)" alt="当前封面">
+                        </div>
+                        <div class="cover-preview-large placeholder" v-else>
+                            <span>暂无封面</span>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>上传新封面</label>
+                        <label class="btn btn-sm cover-upload-btn">
+                            <input type="file" accept="image/*" @change="handleEditVideoCoverUpload" style="display:none;">
+                            📷 选择图片
+                        </label>
+                    </div>
+                    <div class="form-group" v-if="editingVideo && editingVideo.url && editingVideo.url.includes('bilibili.com')">
+                        <label>从B站自动获取</label>
+                        <button class="btn btn-sm" @click="fetchBilibiliCoverForEdit" :disabled="fetchingBilibiliCover">
+                            {{ fetchingBilibiliCover ? '获取中...' : '🔍 从B站获取封面' }}
+                        </button>
+                    </div>
+                    <div class="modal-btns">
+                        <button class="btn" @click="closeCoverUploadModal">取消</button>
+                        <button class="btn btn-accent" @click="saveVideoCover" :disabled="savingCover">保存</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 挑战详情弹窗 -->
+            <div class="overlay" v-if="showPostForm" @click.self="showPostForm = false">
+                <div class="modal">
+                    <button class="modal-close" @click="showPostForm = false">
+                        <svg width="14" height="14" viewBox="0 0 14 14"><path d="M1 1L13 13M13 1L1 13" stroke="currentColor" stroke-width="1.5"/></svg>
+                    </button>
+                    <h2 class="modal-name">发布帖子</h2>
+                    <div class="form-group">
+                        <label>分类</label>
+                        <select class="select" v-model="newPostCategory">
+                            <option v-for="cat in forumCategories" :key="cat" :value="cat">{{ cat }}</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>昵称</label>
+                        <input class="input" v-model="newPostAuthor" placeholder="昵称（可选，默认匿名）">
+                    </div>
+                    <div class="form-group">
+                        <label>标题</label>
+                        <input class="input" v-model="newPostTitle" placeholder="请输入帖子标题">
+                    </div>
+                    <div class="form-group">
+                        <label>内容</label>
+                        <textarea class="textarea" v-model="newPostContent" placeholder="请输入帖子内容..."></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>图片（最多9张）</label>
+                        <div class="image-upload-area">
+                            <div class="image-preview-list">
+                                <div class="image-preview-item" v-for="(img, idx) in newPostImages" :key="idx">
+                                    <img :src="img" alt="预览图">
+                                    <button class="image-remove-btn" @click="removePostImage(idx)">×</button>
+                                </div>
+                                <label class="image-upload-btn" v-if="newPostImages.length < 9">
+                                    <input type="file" accept="image/*" multiple @change="handlePostImageUpload" style="display:none;">
+                                    <span v-if="uploadingImage">上传中...</span>
+                                    <span v-else>+ 添加图片</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-btns">
+                        <button class="btn" @click="showPostForm = false">取消</button>
+                        <button class="btn btn-accent" @click="submitPost">发布</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 挑战详情弹窗 -->
+            <div class="overlay" v-if="challengeDetail && challengeDetail.petName" @click.self="closeChallengeDetail">
+                <div class="modal challenge-modal">
+                    <button class="modal-close" @click="closeChallengeDetail">
+                        <svg width="14" height="14" viewBox="0 0 14 14"><path d="M1 1L13 13M13 1L1 13" stroke="currentColor" stroke-width="1.5"/></svg>
+                    </button>
+                    <h2 class="modal-name">{{ challengeDetail.petName || challengeDetail.file }}</h2>
+                    <div class="modal-meta">{{ challengeDetail.date }} / {{ challengeDetail.category || '' }} / {{ getFormationCount(challengeDetail) }} 关</div>
+                    
+                    <div class="modal-section" v-if="challengeDetail.rules && challengeDetail.rules.length">
+                        <h3>关卡规则</h3>
+                        <div class="rules-list">
+                            <div class="rule-item" v-for="(rule, idx) in challengeDetail.rules" :key="'rule-'+idx">
+                                <span class="rule-num">{{ idx + 1 }}</span>
+                                <span class="rule-text">{{ rule }}</span>
+                            </div>
+                        </div>
+                        <div class="entries-list" v-if="challengeDetail.entries && challengeDetail.entries.length">
+                            <div class="entry-item" v-for="(entry, idx) in challengeDetail.entries" :key="'entry-'+idx">
+                                <span class="entry-label">机制{{ idx + 1 }}:</span>
+                                <span class="entry-text">{{ entry }}</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="modal-section">
+                        <h3>敌方阵容</h3>
+                        <div class="formation-tabs" v-if="challengeDetail.levelStructure && challengeDetail.levelStructure.length">
+                            <button class="tab-btn" 
+                                    v-for="(ls, idx) in challengeDetail.levelStructure" 
+                                    :key="'tab-'+idx"
+                                    :class="{ active: activeFormationTab === idx }"
+                                    @click="activeFormationTab = idx">
+                                {{ ls.levelName }}
+                            </button>
+                        </div>
+                        <div class="formation-content">
+                            <div class="team-list" v-if="getCurrentLevelStructure(challengeDetail, activeFormationTab)">
+                                <div class="team-item" v-for="(teamId, tIdx) in getTeamIds(challengeDetail, activeFormationTab)" :key="teamId">
+                                    <div class="team-header">
+                                        <span class="team-num">阵{{ tIdx + 1 }}</span>
+                                    </div>
+                                    <div class="formation-wrapper" v-if="challengeDetail.formations && challengeDetail.formations[teamId]">
+                                        <div class="grid-9">
+                                            <div class="grid-cell" v-for="pos in 9" :key="pos">
+                                                <div class="cell-inner" v-if="getBattlePet(challengeDetail.formations[teamId], pos)">
+                                                    <img :src="'/images/peticon/' + getBattlePet(challengeDetail.formations[teamId], pos).raceId" 
+                                                         :alt="getBattlePet(challengeDetail.formations[teamId], pos).name"
+                                                         @error="handleGridImgError($event, getBattlePet(challengeDetail.formations[teamId], pos))"
+                                                         @load="handleGridImgLoad($event, getBattlePet(challengeDetail.formations[teamId], pos))"
+                                                         :class="{ hidden: getBattlePet(challengeDetail.formations[teamId], pos).iconError }">
+                                                    <span class="cell-placeholder" v-if="getBattlePet(challengeDetail.formations[teamId], pos).iconError">{{ getBattlePet(challengeDetail.formations[teamId], pos).name[0] }}</span>
+                                                    <span class="cell-name">{{ getBattlePet(challengeDetail.formations[teamId], pos).name }}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="support-pets" v-if="getSupportPets(challengeDetail.formations[teamId]).length">
+                                            <div class="support-label">神使/契约</div>
+                                            <div class="support-list">
+                                                <div class="support-item" v-for="p in getSupportPets(challengeDetail.formations[teamId])" :key="p.raceId">
+                                                    <img :src="'/images/peticon/' + p.raceId" :alt="p.name"
+                                                         @error="handleGridImgError($event, p)"
+                                                         @load="handleGridImgLoad($event, p)"
+                                                         :class="{ hidden: p.iconError }">
+                                                    <span class="support-placeholder" v-if="p.iconError">{{ p.name[0] }}</span>
+                                                    <span class="support-name">{{ p.name }}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="team-list" v-else-if="challengeDetail && challengeDetail.formations">
+                                <div class="team-item" v-for="(fm, tid) in getFormationKeys(challengeDetail.formations)" :key="tid">
+                                    <div class="team-header">
+                                        <span class="team-num">关卡 {{ tid }}</span>
+                                    </div>
+                                    <div class="formation-wrapper" v-if="challengeDetail.formations && challengeDetail.formations[tid]">
+                                        <div class="grid-9">
+                                            <div class="grid-cell" v-for="pos in 9" :key="pos">
+                                                <div class="cell-inner" v-if="getBattlePet(challengeDetail.formations[tid], pos)">
+                                                    <img :src="'/images/peticon/' + getBattlePet(challengeDetail.formations[tid], pos).raceId" 
+                                                         :alt="getBattlePet(challengeDetail.formations[tid], pos).name"
+                                                         @error="handleGridImgError($event, getBattlePet(challengeDetail.formations[tid], pos))"
+                                                         @load="handleGridImgLoad($event, getBattlePet(challengeDetail.formations[tid], pos))"
+                                                         :class="{ hidden: getBattlePet(challengeDetail.formations[tid], pos).iconError }">
+                                                    <span class="cell-placeholder" v-if="getBattlePet(challengeDetail.formations[tid], pos).iconError">{{ getBattlePet(challengeDetail.formations[tid], pos).name[0] }}</span>
+                                                    <span class="cell-name">{{ getBattlePet(challengeDetail.formations[tid], pos).name }}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="support-pets" v-if="getSupportPets(challengeDetail.formations[tid]).length">
+                                            <div class="support-label">神使/契约</div>
+                                            <div class="support-list">
+                                                <div class="support-item" v-for="p in getSupportPets(challengeDetail.formations[tid])" :key="p.raceId">
+                                                    <img :src="'/images/peticon/' + p.raceId" :alt="p.name"
+                                                         @error="handleGridImgError($event, p)"
+                                                         @load="handleGridImgLoad($event, p)"
+                                                         :class="{ hidden: p.iconError }">
+                                                    <span class="support-placeholder" v-if="p.iconError">{{ p.name[0] }}</span>
+                                                    <span class="support-name">{{ p.name }}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 登录/注册弹窗 -->
+            <div class="overlay" v-if="showAuthModal" @click.self="closeAuthModal">
+                <div class="modal auth-modal">
+                    <button class="modal-close" @click="closeAuthModal">
+                        <svg width="14" height="14" viewBox="0 0 14 14"><path d="M1 1L13 13M13 1L1 13" stroke="currentColor" stroke-width="1.5"/></svg>
+                    </button>
+                    <div class="auth-tabs">
+                        <div class="auth-tab" :class="{ active: authMode === 'login' }" @click="authMode = 'login'">登录</div>
+                        <div class="auth-tab" :class="{ active: authMode === 'register' }" @click="authMode = 'register'">注册</div>
+                    </div>
+                    <div class="form-group">
+                        <label>用户名</label>
+                        <input class="input" v-model="authUsername" placeholder="请输入用户名" @keydown.enter="authMode === 'login' ? doLogin() : doRegister()">
+                    </div>
+                    <div class="form-group">
+                        <label>密码</label>
+                        <input type="password" class="input" v-model="authPassword" placeholder="请输入密码" @keydown.enter="authMode === 'login' ? doLogin() : doRegister()">
+                    </div>
+                    <div class="auth-hint" v-if="authMode === 'register'">
+                        <p>注册后默认角色为普通用户</p>
+                        <p>用户名 3-32 位，密码至少 6 位</p>
+                    </div>
+                    <div class="modal-btns">
+                        <button class="btn" @click="closeAuthModal">取消</button>
+                        <button class="btn btn-accent" @click="authMode === 'login' ? doLogin() : doRegister()" :disabled="authLoading">
+                            {{ authLoading ? '处理中...' : (authMode === 'login' ? '登录' : '注册') }}
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <script src="/js/lib/vue.global.prod.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

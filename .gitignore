@@ -1,0 +1,79 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Node modules
+node_modules/
+
+# Uploads
+**/uploads/
+
+# 精灵图标（所有位置）
+**/peticons/
+
+# 游戏配置数据
+**/output/
+
+# 知识库文档
+**/奥奇传说知识库/
+**/灵初精灵知识库/
+**/敌方阵容关卡图鉴/
+**/精灵基础知识知识库/
+
+# 临时工作目录
+**/temp_work/
+
+# 备份文件
+*.bak
+*.bak2
+*.old
+
+# 压缩包
+*.zip
+*.rar
+*.7z
+
+# 所有图片资源
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.bmp
+*.ico
+
+# 版本文件
+**/last_version.txt
+**/version_prev.json
+
+# 子模块目录
+aoqi/aoqi-agent/
+
+# 根目录的大文件
+aoqi.zip
