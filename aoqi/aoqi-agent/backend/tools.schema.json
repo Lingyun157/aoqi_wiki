@@ -1,0 +1,152 @@
+{
+  "name": "aoqi_tools",
+  "version": "1.0",
+  "description": "奥奇传说知识库与游戏数据工具集",
+  "tools": [
+    {
+      "name": "aoqi_search_challenges",
+      "description": "搜索挑战活动列表，获取可用的挑战名称和ID。当用户问'有什么挑战'或'xx活动怎么打'时使用。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "keyword": {
+            "type": "string",
+            "description": "搜索关键词，匹配挑战名称"
+          }
+        }
+      }
+    },
+    {
+      "name": "aoqi_get_challenge",
+      "description": "获取指定挑战的完整详情，包括敌方精灵、阵型、规则描述。当用户问某个具体挑战的攻略时使用。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "挑战名称或文件ID，如'[灵初]辰光星钥·启'"
+          }
+        },
+        "required": ["name"]
+      }
+    },
+    {
+      "name": "aoqi_search_knowledge",
+      "description": "在知识库中搜索精灵、Buff、机制、挑战等条目。需要了解精灵技能、Buff效果、游戏机制时使用。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "搜索关键词"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["精灵", "buff", "挑战活动", "游戏机制"],
+            "description": "按类型过滤"
+          },
+          "element": {
+            "type": "string",
+            "description": "按属性过滤，如'神光''神火'"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "返回结果数量，默认10",
+            "default": 10
+          }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "aoqi_get_knowledge_page",
+      "description": "获取知识库中某个条目的完整内容。搜索后需要查看完整条目详情时使用。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "description": "页面slug，格式如'01-灵初精灵/奇迹光衍·诺亚'"
+          }
+        },
+        "required": ["slug"]
+      }
+    },
+    {
+      "name": "aoqi_compare_pets",
+      "description": "对比多个精灵之间的属性克制关系。当用户问'A和B谁克制谁'时使用。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "petIds": {
+            "type": "array",
+            "items": {"type": "integer"},
+            "description": "精灵raceId数组，至少2个"
+          }
+        },
+        "required": ["petIds"]
+      }
+    },
+    {
+      "name": "aoqi_recommend_team",
+      "description": "基于敌方阵容推荐克制精灵。当用户问'xx挑战怎么组队'时使用。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "enemyRaceIds": {
+            "type": "array",
+            "items": {"type": "integer"},
+            "description": "敌方精灵的raceId列表"
+          },
+          "teamSize": {
+            "type": "integer",
+            "description": "推荐阵容大小",
+            "default": 3
+          }
+        },
+        "required": ["enemyRaceIds"]
+      }
+    },
+    {
+      "name": "aoqi_analyze_challenge",
+      "description": "结构化解析挑战关卡，提取敌方精灵、属性覆盖、规则等关键信息。比get_challenge返回更结构化的分析结果。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "挑战名称或文件ID"
+          }
+        },
+        "required": ["name"]
+      }
+    },
+    {
+      "name": "aoqi_validate_team",
+      "description": "验证阵容是否符合挑战规则，检查重复、数量限制、时代限制等。推荐阵容后调用验证。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "teamRaceIds": {
+            "type": "array",
+            "items": {"type": "integer"},
+            "description": "我方精灵raceId列表"
+          },
+          "challengeName": {
+            "type": "string",
+            "description": "关联的挑战名称"
+          }
+        },
+        "required": ["teamRaceIds"]
+      }
+    },
+    {
+      "name": "aoqi_get_knowledge_stats",
+      "description": "获取知识库统计信息，包括各类型条目数量。",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ]
+}
