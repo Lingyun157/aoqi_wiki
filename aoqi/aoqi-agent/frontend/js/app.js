@@ -1058,18 +1058,31 @@ const app = createApp({
         }
 
         function formatExtraProperty(formation) {
-            if (!formation || !formation.extraProperty) return [];
-            const raw = String(formation.extraProperty).trim();
-            if (!raw) return [];
-            return raw.split('#').map(item => {
-                const s = item.trim();
-                if (!s) return null;
-                const m = s.match(/^(.+?)([+-])(\d+)$/);
-                if (m) {
-                    return { label: m[1], sign: m[2], value: m[3], raw: s };
+            if (!formation || !formation.pets || !formation.pets.length) return [];
+            const agg = {};
+            for (const pet of formation.pets) {
+                const raw = String(pet.extraProperty || '').trim();
+                if (!raw) continue;
+                for (const item of raw.split('#')) {
+                    const s = item.trim();
+                    if (!s) continue;
+                    const m = s.match(/^(.+?)([+-])(\d+)$/);
+                    if (m) {
+                        const key = m[1];
+                        const delta = parseInt(m[3], 10) * (m[2] === '+' ? 1 : -1);
+                        if (agg[key]) {
+                            agg[key].value += delta;
+                        } else {
+                            agg[key] = { label: key, sign: delta >= 0 ? '+' : '-', value: Math.abs(delta) };
+                        }
+                    }
                 }
-                return { label: s, sign: null, value: null, raw: s };
-            }).filter(Boolean);
+            }
+            return Object.values(agg).map(v => ({
+                label: v.label,
+                sign: v.sign,
+                value: String(v.value),
+            }));
         }
 
         function getBattlePet(formation, position) {
