@@ -880,6 +880,40 @@ AGENT_TOOLS_MANIFEST = {
                 }
             },
             'example': 'POST /api/team/validate { "teamRaceIds": [7266, 7271], "challengeName": "[灵初]辰光星钥·启" }'
+        },
+        {
+            'name': 'get_health',
+            'method': 'GET',
+            'path': '/api/health',
+            'purpose': '获取系统健康状态和数据统计信息',
+            'when_to_use': ['检查系统状态', '获取数据统计概览'],
+            'when_not_to_use': ['日常业务查询不需要调用'],
+            'input': {},
+            'output': {
+                'type': 'object',
+                'fields': {
+                    'status': 'string',
+                    'data': 'object (精灵数/挑战数/知识页数)'
+                }
+            },
+            'example': 'GET /api/health'
+        },
+        {
+            'name': 'get_changelog',
+            'method': 'GET',
+            'path': '/api/changelog',
+            'purpose': '获取系统变更日志和最新数据更新',
+            'when_to_use': ['了解系统版本和更新内容', '获取最新数据更新列表'],
+            'when_not_to_use': ['日常业务查询不需要调用'],
+            'input': {},
+            'output': {
+                'type': 'object',
+                'fields': {
+                    'version': 'string',
+                    'recent_data_updates': 'array (最近数据更新列表)'
+                }
+            },
+            'example': 'GET /api/changelog'
         }
     ]
 }
@@ -1080,6 +1114,65 @@ def compare_pets():
 
 def clean_spirit_name(name):
     return name.replace('[灵初]', '').replace('[星迹]', '').replace('[神运]', '').replace('[启元]', '').replace('[传说]', '')
+
+def add_meta(data, endpoint=''):
+    meta = {
+        'data_version': '1.0',
+        'data_date': time.strftime('%Y-%m-%d'),
+        'generated_at': time.strftime('%Y-%m-%dT%H:%M:%S'),
+        'endpoint': endpoint,
+        'server': 'aoqi-agent',
+    }
+    if isinstance(data, dict):
+        data['_meta'] = meta
+    return data
+
+@app.route('/api/health', methods=['GET'])
+def api_health():
+    load_data()
+    db_stats = get_stats()
+    return jsonify(add_meta({
+        'status': 'healthy',
+        'data': {
+            'pets_count': len(pets_data) if pets_data else 0,
+            'challenges_count': len(formations_data) if formations_data else 0,
+            'knowledge_pages': db_stats.get('total_pages', 0),
+            'knowledge_by_type': db_stats.get('by_type', {}),
+        }
+    }, '/api/health'))
+
+@app.route('/api/changelog', methods=['GET'])
+def api_changelog():
+    changelog = {
+        'version': '1.0.0',
+        'released': '2026-08-14',
+        'changes': [
+            {
+                'version': '1.0.0',
+                'date': '2026-08-14',
+                'items': [
+                    '新增知识库检索API (/api/knowledge/*)',
+                    '新增Agent工具清单 (/api/tools/manifest)',
+                    '新增挑战分析API (/api/challenge/analyze)',
+                    '新增阵容验证API (/api/team/validate)',
+                    '新增MCP Server支持',
+                ]
+            }
+        ],
+        'recent_data_updates': []
+    }
+    
+    if formations_data:
+        sorted_challenges = sorted(formations_data, key=lambda x: x.get('date', ''), reverse=True)
+        recent = sorted_challenges[:5]
+        for c in recent:
+            changelog['recent_data_updates'].append({
+                'type': 'challenge',
+                'name': c.get('petName', ''),
+                'date': c.get('date', ''),
+            })
+    
+    return jsonify(add_meta(changelog, '/api/changelog'))
 
 @app.route('/api/videos', methods=['GET'])
 def get_videos():
