@@ -13,6 +13,7 @@ from collections import defaultdict
 from functools import wraps
 from urllib.parse import urlparse
 from database import init_db, get_db, hash_password, verify_password, ROLE_HIERARCHY, ROLE_SUPER_ADMIN, ROLE_ADMIN, ROLE_USER, DB_CONFIG
+from knowledge_base import build_index, search_pages, get_page, get_page_list, get_stats
 
 try:
     from PIL import Image
@@ -637,6 +638,409 @@ def get_challenge(name):
         return jsonify({'error': 'Not found'}), 404
     
     return jsonify(challenge)
+
+# ==================== 知识库检索 ====================
+
+@app.route('/api/knowledge/search', methods=['POST'])
+def knowledge_search():
+    data = request.get_json() or {}
+    query = data.get('query', '').strip()
+    page_type = data.get('type') or data.get('page_type')
+    element = data.get('element')
+    limit = min(int(data.get('limit', 10)), 50)
+    offset = max(int(data.get('offset', 0)), 0)
+    
+    results = search_pages(query, page_type, element, limit, offset)
+    return jsonify({
+        'query': query,
+        'total': len(results),
+        'results': results
+    })
+
+@app.route('/api/knowledge/search', methods=['GET'])
+def knowledge_search_get():
+    query = request.args.get('q', '').strip()
+    page_type = request.args.get('type')
+    element = request.args.get('element')
+    limit = min(int(request.args.get('limit', 10)), 50)
+    offset = max(int(request.args.get('offset', 0)), 0)
+    
+    results = search_pages(query, page_type, element, limit, offset)
+    return jsonify({
+        'query': query,
+        'total': len(results),
+        'results': results
+    })
+
+@app.route('/api/knowledge/page/<path:slug>', methods=['GET'])
+def knowledge_page(slug):
+    page = get_page(slug)
+    if not page:
+        return jsonify({'error': 'Not found'}), 404
+    return jsonify(page)
+
+@app.route('/api/knowledge/pages', methods=['GET'])
+def knowledge_pages_list():
+    page_type = request.args.get('type')
+    element = request.args.get('element')
+    search = request.args.get('search')
+    limit = min(int(request.args.get('limit', 50)), 200)
+    offset = max(int(request.args.get('offset', 0)), 0)
+    return jsonify(get_page_list(page_type, element, search, limit, offset))
+
+@app.route('/api/knowledge/stats', methods=['GET'])
+def knowledge_stats():
+    return jsonify(get_stats())
+
+@app.route('/api/knowledge/reindex', methods=['POST'])
+def knowledge_reindex():
+    build_index(force=True)
+    return jsonify({'status': 'ok', 'message': 'Knowledge index rebuilt'})
+
+# ==================== Agent Tools Manifest ====================
+
+AGENT_TOOLS_MANIFEST = {
+    'version': '1.0',
+    'description': '奥奇传说 Agent 工具清单 - 每个接口的语义说明、使用时机、输入输出',
+    'tools': [
+        {
+            'name': 'search_challenges',
+            'method': 'GET',
+            'path': '/api/challenges',
+            'purpose': '搜索挑战活动列表，获取可用的挑战名称和ID',
+            'when_to_use': ['用户问"有什么挑战"', "用户问'xx活动怎么打'", '需要获取挑战列表时'],
+            'when_not_to_use': ['已知挑战名称时直接用 get_challenge'],
+            'input': {
+                'keyword': {'type': 'string', 'required': False, 'description': '搜索关键词，匹配挑战名称'}
+            },
+            'output': {
+                'type': 'array',
+                'item': {'id': 'string', 'name': 'string', 'date': 'string', 'levelCount': 'number'}
+            },
+            'example': 'GET /api/challenges?keyword=龙尊'
+        },
+        {
+            'name': 'get_challenge',
+            'method': 'GET',
+            'path': '/api/challenge/<name>',
+            'purpose': '获取指定挑战的完整详情，包括敌方精灵、阵型、规则描述',
+            'when_to_use': ['用户问某个具体挑战的攻略', '需要分析敌方阵容和规则', '推荐阵容前先获取敌方数据'],
+            'when_not_to_use': ['搜索挑战列表时用 search_challenges'],
+            'input': {
+                'name': {'type': 'string', 'required': True, 'description': '挑战名称或文件ID，如"[灵初]辰光星钥·启"'}
+            },
+            'output': {
+                'type': 'object',
+                'fields': {
+                    'petName': 'string (挑战名称)',
+                    'formations': 'object (阵型ID -> 阵型详情)',
+                    'levelStructure': 'array (关卡结构)',
+                    'rules': 'array (规则描述文本)'
+                }
+            },
+            'example': 'GET /api/challenge/[灵初]辰光星钥·启'
+        },
+        {
+            'name': 'search_knowledge',
+            'method': 'POST',
+            'path': '/api/knowledge/search',
+            'purpose': '在知识库中搜索精灵、Buff、机制、挑战等条目',
+            'when_to_use': ['需要了解某个精灵的技能和属性', '需要查询某个Buff的效果', '需要查找游戏机制说明', '需要补充背景知识'],
+            'when_not_to_use': ['需要获取结构化阵容数据时用 get_challenge', '需要精确属性克制对比时用 compare_pets'],
+            'input': {
+                'query': {'type': 'string', 'required': True, 'description': '搜索关键词，支持中文名、属性、职业等'},
+                'type': {'type': 'string', 'required': False, 'enum': ['精灵', 'buff', '挑战活动', '游戏机制'], 'description': '按类型过滤'},
+                'element': {'type': 'string', 'required': False, 'description': '按属性过滤，如"神光""神火"'}
+            },
+            'output': {
+                'type': 'object',
+                'fields': {
+                    'query': 'string (原始查询)',
+                    'total': 'number (结果数)',
+                    'results': 'array (搜索结果列表)'
+                }
+            },
+            'example': 'POST /api/knowledge/search { "query": "诺亚", "type": "精灵" }'
+        },
+        {
+            'name': 'get_knowledge_page',
+            'method': 'GET',
+            'path': '/api/knowledge/page/<slug>',
+            'purpose': '获取知识库中某个条目的完整内容，包含frontmatter和正文',
+            'when_to_use': ['搜索后需要查看完整条目', '需要获取精灵的详细技能描述', '需要获取Buff的完整效果说明'],
+            'when_not_to_use': ['搜索时用 search_knowledge 先定位slug'],
+            'input': {
+                'slug': {'type': 'string', 'required': True, 'description': '页面slug，格式如"01-灵初精灵/奇迹光衍·诺亚"'}
+            },
+            'output': {
+                'type': 'object',
+                'fields': {
+                    'meta': 'object (frontmatter元数据)',
+                    'body': 'string (Markdown正文)',
+                    'tags': 'array (标签列表)'
+                }
+            },
+            'example': 'GET /api/knowledge/page/01-灵初精灵/奇迹光衍·诺亚'
+        },
+        {
+            'name': 'compare_pets',
+            'method': 'POST',
+            'path': '/api/compare',
+            'purpose': '对比多个精灵之间的属性克制关系，输出克制矩阵',
+            'when_to_use': ['用户问"A和B谁克制谁"', '需要分析属性相克关系', '阵容推荐时的属性对比'],
+            'when_not_to_use': ['需要查看完整技能时用 search_knowledge', '需要挑战攻略时用 get_challenge'],
+            'input': {
+                'petIds': {'type': 'array', 'required': True, 'description': '精灵raceId数组，至少2个'}
+            },
+            'output': {
+                'type': 'object',
+                'fields': {
+                    'comparisons': 'array (克制关系矩阵)',
+                    'summary': 'string (文字摘要)'
+                }
+            },
+            'example': 'POST /api/compare { "petIds": [7266, 7271, 6874] }'
+        },
+        {
+            'name': 'recommend_team',
+            'method': 'POST',
+            'path': '/api/recommend',
+            'purpose': '基于敌方阵容推荐克制精灵，返回评分和推荐理由',
+            'when_to_use': ['用户问"xx挑战怎么组队"', '需要针对敌方阵容推荐精灵', '阵容搭配建议'],
+            'when_not_to_use': ['需要精确机制分析时需结合 get_challenge 和 search_knowledge 手动分析', '高难BOSS关卡需手动结合机制'],
+            'input': {
+                'enemyRaceIds': {'type': 'array', 'required': True, 'description': '敌方精灵的raceId列表'},
+                'teamSize': {'type': 'number', 'required': False, 'default': 3, 'description': '推荐阵容大小'}
+            },
+            'output': {
+                'type': 'object',
+                'fields': {
+                    'recommendations': 'array (推荐精灵列表，含评分)',
+                    'summary': 'string (推荐理由摘要)'
+                }
+            },
+            'example': 'POST /api/recommend { "enemyRaceIds": [7266, 7271], "teamSize": 3 }'
+        },
+        {
+            'name': 'get_knowledge_stats',
+            'method': 'GET',
+            'path': '/api/knowledge/stats',
+            'purpose': '获取知识库统计信息，包括各类型条目数量',
+            'when_to_use': ['需要了解知识库规模', '给用户展示数据统计'],
+            'when_not_to_use': ['日常查询不需要调用'],
+            'input': {},
+            'output': {
+                'type': 'object',
+                'fields': {
+                    'total_pages': 'number',
+                    'by_type': 'object (类型->数量)',
+                    'by_element': 'object (属性->数量)'
+                }
+            },
+            'example': 'GET /api/knowledge/stats'
+        },
+        {
+            'name': 'analyze_challenge',
+            'method': 'POST',
+            'path': '/api/challenge/analyze',
+            'purpose': '结构化解析挑战关卡，提取敌方精灵、属性覆盖、规则等关键信息',
+            'when_to_use': ['需要分析挑战关卡的敌方阵容', '了解敌方属性覆盖用于推荐', '获取关卡结构化信息'],
+            'when_not_to_use': ['需要查看原始数据时用 get_challenge'],
+            'input': {
+                'name': {'type': 'string', 'required': True, 'description': '挑战名称或文件ID'}
+            },
+            'output': {
+                'type': 'object',
+                'fields': {
+                    'levelAnalysis': 'array (每关敌方精灵详情)',
+                    'globalRules': 'array (全局规则)',
+                    'enemyElementCoverage': 'object (敌方属性覆盖统计)'
+                }
+            },
+            'example': 'POST /api/challenge/analyze { "name": "[灵初]辰光星钥·启" }'
+        },
+        {
+            'name': 'validate_team',
+            'method': 'POST',
+            'path': '/api/team/validate',
+            'purpose': '验证阵容是否符合挑战规则，检查重复、数量限制、时代限制等',
+            'when_to_use': ['推荐阵容后验证是否合法', '检查阵容是否符合挑战规则', '分析阵容的属性和职业构成'],
+            'when_not_to_use': ['不需要挑战验证时仅做基本检查'],
+            'input': {
+                'teamRaceIds': {'type': 'array', 'required': True, 'description': '我方精灵raceId列表'},
+                'challengeName': {'type': 'string', 'required': False, 'description': '关联的挑战名称'}
+            },
+            'output': {
+                'type': 'object',
+                'fields': {
+                    'valid': 'boolean',
+                    'errors': 'array (错误列表)',
+                    'warnings': 'array (警告列表)',
+                    'teamAnalysis': 'object (阵容属性/职业分析)'
+                }
+            },
+            'example': 'POST /api/team/validate { "teamRaceIds": [7266, 7271], "challengeName": "[灵初]辰光星钥·启" }'
+        }
+    ]
+}
+
+@app.route('/api/tools/manifest', methods=['GET'])
+def get_tools_manifest():
+    return jsonify(AGENT_TOOLS_MANIFEST)
+
+@app.route('/api/tools/manifest', methods=['POST'])
+def get_tools_manifest_post():
+    return jsonify(AGENT_TOOLS_MANIFEST)
+
+# ==================== 高阶推理API ====================
+
+@app.route('/api/challenge/analyze', methods=['POST'])
+def analyze_challenge():
+    load_data()
+    data = request.get_json() or {}
+    challenge_name = data.get('name', '')
+    
+    challenge = next((c for c in formations_data if 
+                      (c.get('petName') == challenge_name or c.get('file') == challenge_name)), None)
+    
+    if not challenge:
+        return jsonify({'error': 'Challenge not found'}), 404
+    
+    analysis = {
+        'name': challenge.get('petName', ''),
+        'file': challenge.get('file', ''),
+        'date': challenge.get('date', ''),
+        'totalLevels': len(challenge.get('formations', {})),
+        'levelAnalysis': [],
+        'globalRules': [],
+        'keyMechanics': [],
+    }
+    
+    rules = challenge.get('rules', [])
+    for rule in rules:
+        analysis['globalRules'].append({
+            'raw': rule,
+            'type': 'text',
+        })
+    
+    for level_id, level_data in challenge.get('formations', {}).items():
+        level_info = {
+            'levelId': level_id,
+            'levelIndex': level_data.get('levelIndex', 0),
+            'enemyPets': [],
+            'formation': level_data.get('formation', ''),
+            'extraProperty': level_data.get('extraProperty', ''),
+        }
+        
+        for pet in level_data.get('pets', []):
+            pet_info = {
+                'id': pet.get('id'),
+                'raceId': pet.get('fr'),
+                'name': pet.get('n', ''),
+                'level': pet.get('lv', 0),
+                'pets_count': pet.get('ps', ''),
+                'skills': pet.get('sk', ''),
+                'extraProperty': pet.get('extraProperty', ''),
+            }
+            level_info['enemyPets'].append(pet_info)
+        
+        analysis['levelAnalysis'].append(level_info)
+    
+    element_coverage = {}
+    for level in analysis['levelAnalysis']:
+        for pet in level['enemyPets']:
+            pet_data = next((p for p in pets_data if p['raceId'] == pet['raceId']), None)
+            if pet_data:
+                elem = pet_data.get('elementTypeName', '未知')
+                if elem not in element_coverage:
+                    element_coverage[elem] = 0
+                element_coverage[elem] += 1
+    
+    analysis['enemyElementCoverage'] = element_coverage
+    
+    return jsonify(analysis)
+
+@app.route('/api/team/validate', methods=['POST'])
+def validate_team():
+    load_data()
+    data = request.get_json() or {}
+    team_race_ids = data.get('teamRaceIds', [])
+    challenge_name = data.get('challengeName', '')
+    
+    if not team_race_ids:
+        return jsonify({'valid': False, 'errors': ['阵容不能为空']})
+    
+    if not challenge_name:
+        return jsonify({'valid': True, 'warnings': [], 'info': '未关联挑战，仅检查阵容基本规则'})
+    
+    challenge = next((c for c in formations_data if 
+                      (c.get('petName') == challenge_name or c.get('file') == challenge_name)), None)
+    
+    if not challenge:
+        return jsonify({'valid': False, 'errors': ['挑战不存在']})
+    
+    errors = []
+    warnings = []
+    info = []
+    
+    team_pets = []
+    for rid in team_race_ids:
+        pet = next((p for p in pets_data if p['raceId'] == rid), None)
+        if pet:
+            team_pets.append(pet)
+        else:
+            errors.append(f'找不到raceId={rid}的精灵')
+    
+    if len(team_pets) != len(team_race_ids):
+        return jsonify({'valid': False, 'errors': errors})
+    
+    seen_ids = set()
+    for pet in team_pets:
+        rid = pet['raceId']
+        if rid in seen_ids:
+            errors.append(f'精灵 "{pet["name"]}" 重复了')
+        seen_ids.add(rid)
+    
+    pet_count = len(team_pets)
+    if pet_count > 10:
+        errors.append(f'阵容数量({pet_count})超过上限10只')
+    elif pet_count < 3:
+        warnings.append(f'阵容数量({pet_count})偏少，建议至少3只')
+    
+    element_types = set(p.get('elementTypeName', '') for p in team_pets)
+    info.append(f'阵容属性: {", ".join(element_types)}')
+    
+    job_types = set(p.get('jobCategory', '') for p in team_pets)
+    info.append(f'阵容职业: {", ".join(job_types)}')
+    
+    rules = challenge.get('rules', [])
+    for rule in rules:
+        if '只限' in rule or '仅限' in rule:
+            era_match = re.search(r'(只限|仅限)(.+?)(?:时代|精灵)', rule)
+            if era_match:
+                era = era_match.group(2)
+                non_matching = [p for p in team_pets if era not in p.get('name', '')]
+                if non_matching:
+                    warnings.append(f'规则 "{rule}" 可能限制了阵容')
+                    break
+    
+    return jsonify({
+        'valid': len(errors) == 0,
+        'errors': errors,
+        'warnings': warnings,
+        'info': info,
+        'teamAnalysis': {
+            'count': pet_count,
+            'elements': list(element_types),
+            'jobs': list(job_types),
+            'pets': [{
+                'raceId': p['raceId'],
+                'name': p['name'],
+                'element': p.get('elementTypeName', ''),
+                'job': p.get('jobCategory', ''),
+            } for p in team_pets]
+        }
+    })
 
 @app.route('/api/compare', methods=['POST'])
 def compare_pets():
