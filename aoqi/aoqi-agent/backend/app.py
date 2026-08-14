@@ -914,6 +914,60 @@ AGENT_TOOLS_MANIFEST = {
                 }
             },
             'example': 'GET /api/changelog'
+        },
+        {
+            'name': 'agent_memory',
+            'method': 'GET/POST',
+            'path': '/api/agent/memory',
+            'purpose': '获取或设置Agent会话记忆，包括查询历史和用户偏好',
+            'when_to_use': ['需要记住用户偏好', '获取历史查询记录', '个性化推荐'],
+            'when_not_to_use': ['临时查询不需要持久化时'],
+            'input': {
+                'sessionId': {'type': 'string', 'required': False, 'description': '会话ID'},
+                'query': {'type': 'string', 'required': False, 'description': '记录的查询'},
+                'preferences': {'type': 'object', 'required': False, 'description': '用户偏好设置'}
+            },
+            'output': {
+                'type': 'object',
+                'fields': {
+                    'sessionId': 'string',
+                    'profile': 'object (会话档案)'
+                }
+            },
+            'example': 'POST /api/agent/memory { "sessionId": "user1", "query": "诺亚怎么玩" }'
+        },
+        {
+            'name': 'agent_feedback',
+            'method': 'POST',
+            'path': '/api/agent/feedback',
+            'purpose': '收集Agent回答的用户反馈',
+            'when_to_use': ['用户对回答表示满意/不满意时', '收集改进建议'],
+            'when_not_to_use': ['日常查询不需要'],
+            'input': {
+                'query': {'type': 'string', 'required': True, 'description': '用户原始查询'},
+                'agentAnswer': {'type': 'string', 'required': True, 'description': 'Agent的回答'},
+                'helpful': {'type': 'boolean', 'required': True, 'description': '是否有帮助'},
+                'reason': {'type': 'string', 'required': False, 'description': '原因说明'}
+            },
+            'output': {
+                'type': 'object',
+                'fields': {'status': 'string', 'id': 'string'}
+            },
+            'example': 'POST /api/agent/feedback { "query": "推荐阵容", "agentAnswer": "...", "helpful": true }'
+        },
+        {
+            'name': 'get_prompts',
+            'method': 'GET',
+            'path': '/api/agent/prompts',
+            'purpose': '获取预设的Agent Prompt模板',
+            'when_to_use': ['需要生成结构化内容时', '获取Prompt模板'],
+            'when_not_to_use': ['直接查询不需要模板时'],
+            'input': {},
+            'output': {
+                'type': 'object',
+                'description': 'Prompt模板字典'
+            },
+            'example': 'GET /api/agent/prompts'
         }
     ]
 }
@@ -1173,6 +1227,123 @@ def api_changelog():
             })
     
     return jsonify(add_meta(changelog, '/api/changelog'))
+
+# ==================== Agent 会话记忆与反馈 ====================
+
+AGENT_MEMORY_DIR = os.path.join(AOQI_BASE, 'aoqi-agent', 'backend', 'agent_memory')
+os.makedirs(AGENT_MEMORY_DIR, exist_ok=True)
+
+AGENT_FEEDBACK_FILE = os.path.join(AGENT_MEMORY_DIR, 'feedback.json')
+AGENT_PROFILES_FILE = os.path.join(AGENT_MEMORY_DIR, 'profiles.json')
+
+def _load_json(filepath):
+    if os.path.exists(filepath):
+        with open(filepath, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return {}
+
+def _save_json(filepath, data):
+    with open(filepath, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+@app.route('/api/agent/memory', methods=['GET'])
+def agent_memory_get():
+    session_id = request.args.get('sessionId', 'default')
+    profiles = _load_json(AGENT_PROFILES_FILE)
+    return jsonify(add_meta({
+        'sessionId': session_id,
+        'profile': profiles.get(session_id, {}),
+    }, '/api/agent/memory'))
+
+@app.route('/api/agent/memory', methods=['POST'])
+def agent_memory_set():
+    data = request.get_json() or {}
+    session_id = data.get('sessionId', 'default')
+    memory_data = data.get('profile', {})
+    
+    profiles = _load_json(AGENT_PROFILES_FILE)
+    if session_id not in profiles:
+        profiles[session_id] = {
+            'created_at': time.strftime('%Y-%m-%dT%H:%M:%S'),
+            'queries': [],
+            'preferences': {},
+        }
+    
+    profile = profiles[session_id]
+    
+    if 'query' in data:
+        profile['queries'].append({
+            'text': data['query'],
+            'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S'),
+            'result': data.get('result', ''),
+        })
+        profile['queries'] = profile['queries'][-50:]
+    
+    if 'preferences' in data:
+        profile['preferences'].update(data['preferences'])
+    
+    if 'clear' in data and data['clear']:
+        profile['queries'] = []
+        profile['preferences'] = {}
+    
+    profiles[session_id] = profile
+    _save_json(AGENT_PROFILES_FILE, profiles)
+    
+    return jsonify(add_meta({'status': 'ok', 'sessionId': session_id}, '/api/agent/memory'))
+
+@app.route('/api/agent/feedback', methods=['POST'])
+def agent_feedback():
+    data = request.get_json() or {}
+    feedback = _load_json(AGENT_FEEDBACK_FILE)
+    
+    feedback_id = data.get('id') or str(int(time.time() * 1000))
+    feedback[feedback_id] = {
+        'query': data.get('query', ''),
+        'agent_answer': data.get('agentAnswer', ''),
+        'helpful': data.get('helpful', True),
+        'reason': data.get('reason', ''),
+        'category': data.get('category', ''),
+        'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S'),
+        'session_id': data.get('sessionId', 'default'),
+    }
+    
+    _save_json(AGENT_FEEDBACK_FILE, feedback)
+    
+    return jsonify(add_meta({'status': 'ok', 'id': feedback_id}, '/api/agent/feedback'))
+
+@app.route('/api/agent/feedback', methods=['GET'])
+def agent_feedback_list():
+    limit = min(int(request.args.get('limit', 20)), 100)
+    feedback = _load_json(AGENT_FEEDBACK_FILE)
+    
+    sorted_items = sorted(feedback.items(), key=lambda x: x[1].get('timestamp', ''), reverse=True)
+    items = [item[1] for item in sorted_items[:limit]]
+    
+    return jsonify(add_meta({
+        'total': len(feedback),
+        'items': items,
+    }, '/api/agent/feedback'))
+
+@app.route('/api/agent/prompts', methods=['GET'])
+def agent_prompts():
+    prompts = {
+        'generate_pet_review': {
+            'name': '精灵测评生成',
+            'description': '生成精灵的结构化测评prompt',
+            'template': '请根据以下精灵信息生成测评：\n精灵名称：{pet_name}\n属性：{element}\n职业：{profession}\n技能：{skills}\n请从以下维度评价：\n1. 定位分析\n2. 技能强度\n3. 克制关系\n4. 使用场景\n5. 综合评分(1-10)'
+        },
+        'generate_challenge_strategy': {
+            'name': '挑战策略生成',
+            'description': '针对挑战生成多套阵容推荐和策略说明',
+            'template': '请针对挑战"{challenge_name}"生成策略：\n敌方阵容：{enemy_pets}\n规则：{rules}\n请提供：\n1. 推荐阵容（3套）\n2. 每套阵容的推荐理由\n3. 关键注意事项\n4. 过关思路'
+        },
+        'compare_pets': {
+            'name': '精灵对比分析',
+            'description': '对比两只或多只精灵的综合能力',
+            'template': '请对比以下精灵：{pet_list}\n请分析：\n1. 属性克制关系\n2. 技能机制差异\n3. 使用场景对比\n4. 推荐选择'
+        }
+    }
+    return jsonify(add_meta(prompts, '/api/agent/prompts'))
 
 @app.route('/api/videos', methods=['GET'])
 def get_videos():
