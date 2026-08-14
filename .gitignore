@@ -1,0 +1,48 @@
+# === 游戏资源（体积过大，不纳入版本控制）===
+aoqi/output/
+
+# === 知识库（由脚本生成，不纳入版本控制）===
+aoqi/奥奇传说知识库/
+aoqi/敌方阵容关卡图鉴/
+aoqi/灵初精灵知识库/
+
+# === 视频素材 ===
+xiaoai_video_assets/
+
+# === 临时文件 ===
+aoqi/temp_work/
+aoqi/__pycache__/
+aoqi/extract.cache
+aoqi/download_failed.txt
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv
+
+# === Database ===
+*.db
+*.sqlite
+*.sqlite3
+
+# === Uploads ===
+aoqi/aoqi-agent/frontend/uploads/
+
+# === IDE ===
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# === OS ===
+.DS_Store
+Thumbs.db
+
+# === Logs ===
+*.log
