@@ -822,6 +822,11 @@
                                                         </div>
                                                     </div>
                                                 </div>
+                                                <div class="extra-property" v-if="formatExtraProperty(challengeDetail.formations[teamId]).length">
+                                                    <span class="ep-tag" v-for="(ep, eI) in formatExtraProperty(challengeDetail.formations[teamId])" :key="'ep-long-'+teamId+'-'+eI" :class="ep.sign === '+' ? 'ep-pos' : ep.sign === '-' ? 'ep-neg' : ''">
+                                                        <span class="ep-label">{{ ep.label }}</span><span v-if="ep.sign" class="ep-sign">{{ ep.sign }}{{ ep.value }}</span>
+                                                    </span>
+                                                </div>
                                                 <div class="support-pets" v-if="getSupportPets(challengeDetail.formations[teamId]).length">
                                                     <div class="support-label">神使/契约</div>
                                                     <div class="support-list">
@@ -858,6 +863,11 @@
                                                     </div>
                                                 </div>
                                             </div>
+                                            <div class="extra-property" v-if="formatExtraProperty(challengeDetail.formations[fm]).length">
+                                                <span class="ep-tag" v-for="(ep, eI) in formatExtraProperty(challengeDetail.formations[fm])" :key="'ep-fm-'+fm+'-'+eI" :class="ep.sign === '+' ? 'ep-pos' : ep.sign === '-' ? 'ep-neg' : ''">
+                                                    <span class="ep-label">{{ ep.label }}</span><span v-if="ep.sign" class="ep-sign">{{ ep.sign }}{{ ep.value }}</span>
+                                                </span>
+                                            </div>
                                             <div class="support-pets" v-if="getSupportPets(challengeDetail.formations[fm]).length">
                                                 <div class="support-label">神使/契约</div>
                                                 <div class="support-list">
@@ -893,6 +903,11 @@
                                                     <span class="cell-name">{{ getBattlePet(challengeDetail.formations[teamId], pos).name }}</span>
                                                 </div>
                                             </div>
+                                        </div>
+                                        <div class="extra-property" v-if="formatExtraProperty(challengeDetail.formations[teamId]).length">
+                                            <span class="ep-tag" v-for="(ep, eI) in formatExtraProperty(challengeDetail.formations[teamId])" :key="'ep-tab-'+teamId+'-'+eI" :class="ep.sign === '+' ? 'ep-pos' : ep.sign === '-' ? 'ep-neg' : ''">
+                                                <span class="ep-label">{{ ep.label }}</span><span v-if="ep.sign" class="ep-sign">{{ ep.sign }}{{ ep.value }}</span>
+                                            </span>
                                         </div>
                                         <div class="support-pets" v-if="getSupportPets(challengeDetail.formations[teamId]).length">
                                             <div class="support-label">神使/契约</div>

@@ -1057,6 +1057,21 @@ const app = createApp({
             return Object.keys(detail.formations);
         }
 
+        function formatExtraProperty(formation) {
+            if (!formation || !formation.extraProperty) return [];
+            const raw = String(formation.extraProperty).trim();
+            if (!raw) return [];
+            return raw.split('#').map(item => {
+                const s = item.trim();
+                if (!s) return null;
+                const m = s.match(/^(.+?)([+-])(\d+)$/);
+                if (m) {
+                    return { label: m[1], sign: m[2], value: m[3], raw: s };
+                }
+                return { label: s, sign: null, value: null, raw: s };
+            }).filter(Boolean);
+        }
+
         function getBattlePet(formation, position) {
             if (!formation || !formation.pets) return null;
             const envoyIds = formation.pets
@@ -1850,6 +1865,7 @@ const app = createApp({
             challengeSearch, challengeList, challengeDetail, searchChallenges, openChallengeDetail,
             activeFormationTab, getBattlePet, getSupportPets, isPetMarked, handleGridImgError, handleGridImgLoad,
             closeChallengeDetail, getFormationCount, getCurrentLevelStructure, getTeamIds, getFormationKeys,
+            formatExtraProperty,
             downloadChallengeLongImg, downloadLongImgLoading, downloadLongImgMode, downloadLongImgProgress,
             formatPlayCount, formatSpiritName, formatTime,
             forumStats, forumCategories, forumCategory, forumSort, forumSearch,

@@ -1022,6 +1022,50 @@ th {
 
 .formation-wrapper { display: flex; flex-direction: column; gap: 12px; }
 
+.extra-property {
+    margin-top: 6px;
+    padding: 8px 10px;
+    background: linear-gradient(135deg, rgba(255, 247, 230, 0.92), rgba(255, 250, 240, 0.96));
+    border: 1px solid rgba(230, 205, 150, 0.55);
+    border-radius: var(--radius);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+}
+.extra-property::before {
+    content: "阵型加成";
+    font-size: 10px;
+    color: #a67c2e;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    margin-right: 4px;
+}
+.ep-tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 8px;
+    background: rgba(255, 255, 255, 0.8);
+    border: 1px solid rgba(200, 180, 130, 0.4);
+    border-radius: 999px;
+    font-size: 11px;
+    color: #5a4220;
+    line-height: 1.4;
+    backdrop-filter: blur(2px);
+}
+.ep-label { font-weight: 500; }
+.ep-sign { margin-left: 3px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ep-pos {
+    background: linear-gradient(135deg, rgba(220, 250, 220, 0.9), rgba(235, 255, 235, 0.95));
+    border-color: rgba(100, 180, 100, 0.4);
+}
+.ep-pos .ep-sign { color: #2e7d32; }
+.ep-neg {
+    background: linear-gradient(135deg, rgba(255, 225, 225, 0.9), rgba(255, 240, 240, 0.95));
+    border-color: rgba(200, 100, 100, 0.35);
+}
+.ep-neg .ep-sign { color: #c62828; }
+
 .support-pets { margin-top: 8px; padding-top: 8px; border-top: 1px dashed rgba(255, 255, 255, 0.6); }
 .support-label { font-size: 10px; color: var(--text-3); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
 .support-list { display: flex; flex-wrap: wrap; gap: 8px; }
