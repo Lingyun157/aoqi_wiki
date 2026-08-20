@@ -2,6 +2,7 @@ import pymysql
 from pymysql.cursors import DictCursor
 import os
 import hashlib
+import hmac
 import secrets
 
 DB_CONFIG = {
@@ -209,6 +210,66 @@ def init_db():
                     INDEX idx_race_video (race_id, video_id),
                     INDEX idx_user_id (user_id),
                     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ''')
+
+            # 帖子点赞表（每用户对每帖子只允许一次，防刷赞）
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS post_likes (
+                    user_id INT NOT NULL,
+                    post_id INT NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (user_id, post_id),
+                    KEY idx_post (post_id),
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                    FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ''')
+
+            # 评论点赞表（每用户对每条评论只允许一次）
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS comment_likes (
+                    user_id INT NOT NULL,
+                    comment_id INT NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (user_id, comment_id),
+                    KEY idx_comment (comment_id),
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                    FOREIGN KEY (comment_id) REFERENCES comments(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ''')
+
+            # 视频点赞表（每用户对每个视频只允许一次）
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS video_likes (
+                    user_id INT NOT NULL,
+                    race_id INT NOT NULL,
+                    video_id VARCHAR(128) NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (user_id, race_id, video_id),
+                    KEY idx_video (race_id, video_id),
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ''')
+
+            # 举报表
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS reports (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    reporter_id INT NULL DEFAULT NULL,
+                    target_type VARCHAR(32) NOT NULL,
+                    target_id VARCHAR(128) NOT NULL,
+                    reason TEXT,
+                    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+                    handled_by INT NULL,
+                    handled_at DATETIME NULL,
+                    note TEXT,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_status (status),
+                    INDEX idx_target (target_type, target_id),
+                    INDEX idx_created_at (created_at DESC),
+                    FOREIGN KEY (reporter_id) REFERENCES users(id) ON DELETE SET NULL,
+                    FOREIGN KEY (handled_by) REFERENCES users(id) ON DELETE SET NULL
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             ''')
 

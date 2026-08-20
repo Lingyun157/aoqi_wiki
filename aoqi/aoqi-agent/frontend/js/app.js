@@ -411,19 +411,7 @@ const app = createApp({
                     .map(p => ({ ...p, iconError: false, videoCount: 0 }))
                     .sort((a, b) => b.raceId - a.raceId);
                 
-                // 加载视频数量
-                try {
-                    const statsData = await api('/videos?page=1&pageSize=999');
-                    const allVideos = statsData.data || [];
-                    const countMap = {};
-                    for (const v of allVideos) {
-                        const rid = v.spiritRaceId;
-                        if (rid) countMap[rid] = (countMap[rid] || 0) + 1;
-                    }
-                    for (const p of spiritFolderList.value) {
-                        p.videoCount = countMap[p.raceId] || 0;
-                    }
-                } catch {}
+                await applyVideoCounts();
                 filterSpiritFolders();
             } catch {
                 petElements.value = [];
@@ -527,19 +515,18 @@ const app = createApp({
         }
 
         // === Spirit Folder Functions ===
-        async function refreshVideoCounts() {
+        // 轻量统计每个精灵的视频数量（避免拉取全部视频）
+        async function applyVideoCounts() {
             try {
-                const statsData = await api('/videos?page=1&pageSize=999');
-                const allVideos = statsData.data || [];
-                const countMap = {};
-                for (const v of allVideos) {
-                    const rid = v.spiritRaceId;
-                    if (rid) countMap[rid] = (countMap[rid] || 0) + 1;
-                }
+                const counts = await api('/videos/counts');
                 for (const p of spiritFolderList.value) {
-                    p.videoCount = countMap[p.raceId] || 0;
+                    p.videoCount = counts[p.raceId] || 0;
                 }
             } catch {}
+        }
+
+        async function refreshVideoCounts() {
+            await applyVideoCounts();
         }
 
         function filterSpiritFolders() {
@@ -1357,16 +1344,21 @@ const app = createApp({
             }
             if (!newCommentContent.value.trim() || !forumDetailPost.value) return;
             try {
+                const body = {
+                    content: newCommentContent.value,
+                    images: newCommentImages.value
+                };
+                if (replyToComment.value) {
+                    body.parent_id = replyToComment.value.id;
+                }
                 await api(`/forum/post/${forumDetailPost.value.id}/comment`, {
                     method: 'POST',
-                    body: JSON.stringify({
-                        content: newCommentContent.value,
-                        images: newCommentImages.value
-                    })
+                    body: JSON.stringify(body)
                 });
                 newCommentContent.value = '';
                 newCommentAuthor.value = '';
                 newCommentImages.value = [];
+                replyToComment.value = null;
                 loadForumComments(forumDetailPost.value.id);
                 forumDetailPost.value.comment_count++;
             } catch (e) {
@@ -1429,9 +1421,11 @@ const app = createApp({
                         method: 'POST',
                         body: formData
                     });
-                    if (res.url) {
-                        currentUser.value.avatar = res.url;
+                    if (res.avatar) {
+                        currentUser.value.avatar = res.avatar;
                         setStoredUser(currentUser.value);
+                    } else if (res.error) {
+                        alert(res.error);
                     }
                 } catch (e) {
                     alert('头像上传失败');
@@ -1516,11 +1510,27 @@ const app = createApp({
         const currentProfileTab = ref('posts');
 
         async function openUserProfile(userId) {
-            const res = await api(`/auth/user/${userId}/profile`);
-            profileUser.value = res.user;
-            profilePosts.value = res.posts || [];
-            profileComments.value = res.comments || [];
+            profileUser.value = { id: userId };
             showUserProfile.value = true;
+            currentProfileTab.value = 'posts';
+            const res = await api(`/auth/user/${userId}/profile`);
+            if (res && res.user) {
+                profileUser.value = res.user;
+                profilePosts.value = res.items || [];
+            }
+            profileComments.value = [];
+        }
+
+        async function switchProfileTab(tab) {
+            if (!profileUser.value || !profileUser.value.id) return;
+            currentProfileTab.value = tab;
+            const res = await api(`/auth/user/${profileUser.value.id}/profile?tab=${tab}&pageSize=50`);
+            const items = (res && res.items) || [];
+            if (tab === 'comments') {
+                profileComments.value = items;
+            } else {
+                profilePosts.value = items;
+            }
         }
 
         // === Post Edit ===
@@ -1686,6 +1696,32 @@ const app = createApp({
             auditLogs.value = res.data || [];
         }
 
+        // === Report Management (管理员) ===
+        const showReports = ref(false);
+        const reports = ref([]);
+        const reportsPage = ref(1);
+        const reportsTotal = ref(0);
+        const reportsStatusFilter = ref('pending');
+
+        async function loadReports(page) {
+            reportsPage.value = page || 1;
+            const res = await api(`/reports?page=${reportsPage.value}&status=${reportsStatusFilter.value}`);
+            reports.value = res.data || [];
+            reportsTotal.value = res.total || 0;
+        }
+
+        async function handleReport(reportId, status) {
+            const res = await api(`/reports/${reportId}`, {
+                method: 'PUT',
+                body: JSON.stringify({ status })
+            });
+            if (res.success) {
+                loadReports(reportsPage.value);
+            } else if (res.error) {
+                alert(res.error);
+            }
+        }
+
         // === Database Backup ===
         async function backupDatabase() {
             if (!confirm('确定备份数据库？')) return;
@@ -1804,45 +1840,34 @@ const app = createApp({
 
         async function submitReport() {
             if (!currentUser.value) { openLogin(); return; }
-            alert('举报已提交，管理员将尽快处理');
-            showReportModal.value = false;
-            reportReason.value = '';
+            if (!reportTarget.value) return;
+            if (!reportReason.value.trim()) {
+                alert('请填写举报原因');
+                return;
+            }
+            try {
+                const res = await api('/report', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        target_type: reportTarget.value.type,
+                        target_id: reportTarget.value.id,
+                        reason: reportReason.value.trim()
+                    })
+                });
+                if (res.success) {
+                    alert(res.message || '举报已提交，管理员将尽快处理');
+                    showReportModal.value = false;
+                    reportReason.value = '';
+                } else if (res.error) {
+                    alert(res.error);
+                }
+            } catch (e) {
+                alert('举报提交失败：' + (e.message || e));
+            }
         }
 
         // Modify submitComment to support replyToComment
-        async function submitCommentWithReply() {
-            if (!currentUser.value) {
-                alert('请先登录');
-                openLogin();
-                return;
-            }
-            if (!newCommentContent.value.trim() || !forumDetailPost.value) return;
-            try {
-                const body = {
-                    content: newCommentContent.value,
-                    images: newCommentImages.value
-                };
-                if (replyToComment.value) {
-                    body.parent_id = replyToComment.value.id;
-                }
-                await api(`/forum/post/${forumDetailPost.value.id}/comment`, {
-                    method: 'POST',
-                    body: JSON.stringify(body)
-                });
-                newCommentContent.value = '';
-                newCommentAuthor.value = '';
-                newCommentImages.value = [];
-                replyToComment.value = null;
-                loadForumComments(forumDetailPost.value.id);
-                forumDetailPost.value.comment_count++;
-            } catch (e) {
-                alert('评论失败：' + (e.message || e));
-            }
-        }
-
-        // Override submitComment with reply support
-        const _origSubmitComment = submitComment;
-        submitComment = submitCommentWithReply;
+        // (submitComment 已合并为支持回复的单一实现)
 
         return {
             currentPage, sidebarCollapsed, navItems, stats,
@@ -1891,7 +1916,7 @@ const app = createApp({
             showAdminPanel, adminUsers, adminUsersPage, adminUsersTotal, adminSearchKeyword,
             loadAdminUsers, changeUserRole,
             // User Profile
-            showUserProfile, profileUser, profilePosts, profileComments, currentProfileTab, openUserProfile,
+            showUserProfile, profileUser, profilePosts, profileComments, currentProfileTab, openUserProfile, switchProfileTab,
             // Post Edit
             editingPost, editPostTitle, editPostContent, editPostCategory,
             startEditPost, cancelEditPost, saveEditPost,
@@ -1909,6 +1934,9 @@ const app = createApp({
             loadNotifications, loadUnreadCount, markNotificationRead, markAllRead,
             // Audit Logs
             showAuditLogs, auditLogs, auditLogsPage, loadAuditLogs,
+            // Report Management
+            showReports, reports, reportsPage, reportsTotal, reportsStatusFilter,
+            loadReports, handleReport,
             // Database Backup
             backupDatabase,
             // Formation Simulator

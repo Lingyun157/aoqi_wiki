@@ -247,6 +247,9 @@ bilibili_videos = None
 evo_config = None
 element_detail_cache = None
 pet_by_id_cache = None
+# 属性克制矩阵缓存：race_mult_matrix[i][j] = 属性i攻击属性j的倍率；element_index[属性名] = 下标
+race_mult_matrix = []
+element_index = {}
 
 # 文件最后修改时间，用于自动重载
 _last_load_time = 0
@@ -268,7 +271,7 @@ def check_files_changed():
     return False
 
 def load_data(force=False):
-    global pets_data, pets_data_sorted, formations_data, race_config, pet_dict, bilibili_videos, evo_config, _last_load_time, _file_mtimes, element_detail_cache, pet_by_id_cache
+    global pets_data, pets_data_sorted, formations_data, race_config, pet_dict, bilibili_videos, evo_config, _last_load_time, _file_mtimes, element_detail_cache, pet_by_id_cache, race_mult_matrix, element_index
     
     if not force and not check_files_changed():
         return
@@ -346,6 +349,24 @@ def load_data(force=False):
             'weaknesses': weaknesses,
             'multipliers': all_multipliers
         }
+
+    # 预计算属性克制矩阵：race_mult_matrix[i][j] = race_types[i] 攻击 race_types[j] 的倍率
+    # rcs 列表按 race_type 顺序对齐，省去后续 recommend/compare 中的 O(n) 扫描
+    n = len(race_types)
+    race_mult_matrix = []
+    element_index = {}
+    for i, r in enumerate(race_types):
+        element_index[r['nm']] = i
+    for i, r in enumerate(race_types):
+        rcs = r.get('rcs', [])
+        row = [1.0] * n
+        for j in range(n):
+            if j < len(rcs):
+                try:
+                    row[j] = float(rcs[j])
+                except (ValueError, TypeError):
+                    row[j] = 1.0
+        race_mult_matrix.append(row)
 
 load_data()
 
@@ -472,8 +493,6 @@ def recommend_team():
     if not enemy_pets:
         return jsonify({'error': 'No enemies provided'}), 400
     
-    race_map = {r['nm']: r for r in race_config.get('race_type', [])}
-    
     enemy_elements = []
     for ep in enemy_pets:
         pet = next((p for p in pets_data if p['raceId'] == ep), None)
@@ -496,16 +515,7 @@ def recommend_team():
         max_mult = 0
         
         for e_elem in enemy_elements:
-            mult = 1.0
-            if pet_elem in race_map and e_elem in race_map:
-                attacker = race_map[pet_elem]
-                defender = race_map[e_elem]
-                def_id = defender['id']
-                rcs = attacker.get('rcs', [])
-                for i, r in enumerate(race_config.get('race_type', [])):
-                    if r['id'] == def_id and i < len(rcs):
-                        mult = float(rcs[i])
-                        break
+            mult = get_multiplier(pet_elem, e_elem)
             total_mult += mult
             if mult > 1.0:
                 counter_count += 1
@@ -513,8 +523,8 @@ def recommend_team():
                 max_mult = mult
         
         avg_mult = total_mult / len(enemy_elements)
-        weak_count = sum(1 for e in enemy_elements if 
-                         get_multiplier(pet_elem, e, race_map, race_config) < 1.0)
+        weak_count = sum(1 for e in enemy_elements if
+                         get_multiplier(pet_elem, e) < 1.0)
         
         score = avg_mult * 100 + counter_count * 10 + (max_mult - 1) * 50 - weak_count * 15
         
@@ -583,16 +593,13 @@ def recommend_team():
         'reasoning': generate_reasoning(enemy_elements, selected)
     })
 
-def get_multiplier(attacker, defender, race_map, config):
-    if attacker not in race_map or defender not in race_map:
+def get_multiplier(attacker, defender, race_map=None, config=None):
+    """返回 attacker 属性攻击 defender 属性的倍率。使用预计算矩阵 O(1) 查询。"""
+    ai = element_index.get(attacker)
+    dj = element_index.get(defender)
+    if ai is None or dj is None:
         return 1.0
-    a = race_map[attacker]
-    d = race_map[defender]
-    rcs = a.get('rcs', [])
-    for i, r in enumerate(config.get('race_type', [])):
-        if r['id'] == d['id'] and i < len(rcs):
-            return float(rcs[i])
-    return 1.0
+    return race_mult_matrix[ai][dj]
 
 def generate_reasoning(enemy_elements, selected):
     lines = []
@@ -693,6 +700,7 @@ def knowledge_stats():
     return jsonify(get_stats())
 
 @app.route('/api/knowledge/reindex', methods=['POST'])
+@role_required(ROLE_ADMIN)
 def knowledge_reindex():
     build_index(force=True)
     return jsonify({'status': 'ok', 'message': 'Knowledge index rebuilt'})
@@ -1145,8 +1153,6 @@ def compare_pets():
         if pet:
             pets.append(pet)
     
-    race_map = {r['nm']: r for r in race_config.get('race_type', [])}
-    
     matrix = []
     for pa in pets:
         row = []
@@ -1156,7 +1162,7 @@ def compare_pets():
             else:
                 ea = pa.get('elementTypeName', '')
                 eb = pb.get('elementTypeName', '')
-                mult = get_multiplier(ea, eb, race_map, race_config)
+                mult = get_multiplier(ea, eb)
                 relation = 'counter' if mult > 1 else ('weak' if mult < 1 else 'neutral')
                 row.append({'multiplier': mult, 'relation': relation})
         matrix.append(row)
@@ -1409,6 +1415,16 @@ def get_videos():
         'page': page,
         'pageSize': page_size
     })
+
+@app.route('/api/videos/counts', methods=['GET'])
+def get_videos_counts():
+    """轻量接口：返回每个 raceId 的视频数量，供前端避免拉取全部视频做统计。"""
+    load_data()
+    counts = {}
+    for race_key, videos in bilibili_videos.items():
+        if videos:
+            counts[race_key] = len(videos)
+    return jsonify(counts)
 
 @app.route('/api/videos/pet/<int:race_id>', methods=['GET'])
 def get_pet_videos(race_id):
@@ -1704,6 +1720,7 @@ def hybrid_action(path):
 # ==================== 用户认证 API ====================
 
 @app.route('/api/auth/register', methods=['POST'])
+@rate_limit(max_requests=10, per_seconds=60)
 def auth_register():
     data = request.get_json() or {}
     username = (data.get('username') or '').strip()
@@ -1744,6 +1761,7 @@ def auth_register():
         conn.close()
 
 @app.route('/api/auth/login', methods=['POST'])
+@rate_limit(max_requests=10, per_seconds=60)
 def auth_login():
     data = request.get_json() or {}
     username = (data.get('username') or '').strip()
@@ -1866,6 +1884,12 @@ def auth_upload_avatar():
     if not allowed_file(file.filename):
         return jsonify({'error': '不支持的图片格式'}), 400
 
+    file.seek(0, 2)
+    size = file.tell()
+    file.seek(0)
+    if size > MAX_UPLOAD_SIZE:
+        return jsonify({'error': '头像大小不能超过 5MB'}), 400
+
     user = g.current_user
     ext = file.filename.rsplit('.', 1)[1].lower()
     filename = f"avatar_{user['user_id']}_{uuid.uuid4().hex[:8]}.{ext}"
@@ -1927,6 +1951,22 @@ def auth_user_profile(user_id):
             cursor.execute('SELECT COUNT(*) as cnt FROM comments WHERE user_id = %s', (user_id,))
             comment_count = cursor.fetchone()['cnt']
 
+            # 收到的点赞数（用于经验/等级）
+            cursor.execute('SELECT COALESCE(SUM(likes), 0) as s FROM posts WHERE user_id = %s', (user_id,))
+            post_likes = cursor.fetchone()['s']
+            cursor.execute('SELECT COALESCE(SUM(likes), 0) as s FROM comments WHERE user_id = %s', (user_id,))
+            comment_likes = cursor.fetchone()['s']
+
+            # 经验/等级体系：发帖/评论/获赞换算积分，等级随积分线性提升
+            points = post_count * 10 + comment_count * 3 + (post_likes or 0) + (comment_likes or 0)
+            level = 1
+            while points >= level * 20:
+                level += 1
+            user['post_count'] = post_count
+            user['comment_count'] = comment_count
+            user['points'] = points
+            user['level'] = min(level, 99)
+
             page = int(request.args.get('page', 1))
             page_size = int(request.args.get('pageSize', 10))
             tab = request.args.get('tab', 'posts')
@@ -1947,8 +1987,6 @@ def auth_user_profile(user_id):
                 items = cursor.fetchall()
                 total = post_count
 
-            user['post_count'] = post_count
-            user['comment_count'] = comment_count
             return jsonify({
                 'user': user,
                 'items': items,
@@ -2134,14 +2172,30 @@ def forum_delete_post(post_id):
 @app.route('/api/forum/post/<int:post_id>/like', methods=['POST'])
 @login_required
 def forum_like_post(post_id):
+    user = g.current_user
     conn = get_db()
     try:
         with conn.cursor() as cursor:
-            cursor.execute('UPDATE posts SET likes = likes + 1 WHERE id = %s', (post_id,))
-            if cursor.rowcount == 0:
+            # 检查帖子存在
+            cursor.execute('SELECT id FROM posts WHERE id = %s', (post_id,))
+            if not cursor.fetchone():
                 return jsonify({'error': 'Post not found'}), 404
+
+            # 已点赞则取消，未点赞则点赞（toggle）
+            cursor.execute(
+                'SELECT 1 FROM post_likes WHERE user_id = %s AND post_id = %s',
+                (user['user_id'], post_id)
+            )
+            liked = cursor.fetchone() is not None
+            if liked:
+                cursor.execute('DELETE FROM post_likes WHERE user_id = %s AND post_id = %s', (user['user_id'], post_id))
+                cursor.execute('UPDATE posts SET likes = GREATEST(likes - 1, 0) WHERE id = %s', (post_id,))
+            else:
+                cursor.execute('INSERT IGNORE INTO post_likes (user_id, post_id) VALUES (%s, %s)', (user['user_id'], post_id))
+                cursor.execute('UPDATE posts SET likes = likes + 1 WHERE id = %s', (post_id,))
+
             cursor.execute('SELECT likes FROM posts WHERE id = %s', (post_id,))
-            return jsonify({'likes': cursor.fetchone()['likes']})
+            return jsonify({'likes': cursor.fetchone()['likes'], 'liked': not liked})
     finally:
         conn.close()
 
@@ -2158,7 +2212,12 @@ def forum_comments(post_id):
 
             offset = (page - 1) * page_size
             cursor.execute(
-                'SELECT id, user_id, author, content, likes, images, parent_id, created_at FROM comments WHERE post_id = %s ORDER BY created_at DESC LIMIT %s OFFSET %s',
+                '''SELECT c.id, c.user_id, c.author, c.content, c.likes, c.images, c.parent_id, c.created_at,
+                          p.author AS parent_author
+                   FROM comments c
+                   LEFT JOIN comments p ON p.id = c.parent_id
+                   WHERE c.post_id = %s
+                   ORDER BY c.created_at DESC LIMIT %s OFFSET %s''',
                 (post_id, page_size, offset)
             )
             comments = cursor.fetchall()
@@ -2194,9 +2253,18 @@ def forum_add_comment(post_id):
             if not post:
                 return jsonify({'error': '帖子不存在'}), 404
 
+            # 如果是回复评论，校验父评论属于同一帖子并通知被回复的评论作者
+            parent_comment = None
+            if parent_id:
+                cursor.execute('SELECT id, user_id, post_id FROM comments WHERE id = %s', (parent_id,))
+                parent_comment = cursor.fetchone()
+                # 父评论不存在或不属于当前帖子时，忽略 parent_id，避免串帖回复
+                if not parent_comment or parent_comment['post_id'] != post_id:
+                    parent_comment = None
+
             cursor.execute(
                 'INSERT INTO comments (post_id, user_id, content, author, images, parent_id) VALUES (%s, %s, %s, %s, %s, %s)',
-                (post_id, user['user_id'], content, user['username'], images_json, parent_id)
+                (post_id, user['user_id'], content, user['username'], images_json, parent_comment['id'] if parent_comment else None)
             )
             comment_id = cursor.lastrowid
             cursor.execute('UPDATE posts SET comment_count = comment_count + 1 WHERE id = %s', (post_id,))
@@ -2210,17 +2278,14 @@ def forum_add_comment(post_id):
                     f'/forum/post/{post_id}'
                 )
 
-            # 如果是回复评论，通知被回复的评论作者
-            if parent_id:
-                cursor.execute('SELECT user_id FROM comments WHERE id = %s', (parent_id,))
-                parent_comment = cursor.fetchone()
-                if parent_comment and parent_comment['user_id'] and parent_comment['user_id'] != user['user_id']:
-                    create_notification(
-                        parent_comment['user_id'], 'reply',
-                        '你的评论收到了回复',
-                        f'{user["username"]} 回复了你的评论',
-                        f'/forum/post/{post_id}'
-                    )
+            # 通知被回复的评论作者
+            if parent_comment and parent_comment['user_id'] and parent_comment['user_id'] != user['user_id']:
+                create_notification(
+                    parent_comment['user_id'], 'reply',
+                    '你的评论收到了回复',
+                    f'{user["username"]} 回复了你的评论',
+                    f'/forum/post/{post_id}'
+                )
 
             return jsonify({'id': comment_id, 'message': '评论成功'})
     finally:
@@ -2252,14 +2317,28 @@ def forum_delete_comment(comment_id):
 @app.route('/api/forum/comment/<int:comment_id>/like', methods=['POST'])
 @login_required
 def forum_like_comment(comment_id):
+    user = g.current_user
     conn = get_db()
     try:
         with conn.cursor() as cursor:
-            cursor.execute('UPDATE comments SET likes = likes + 1 WHERE id = %s', (comment_id,))
-            if cursor.rowcount == 0:
+            cursor.execute('SELECT id FROM comments WHERE id = %s', (comment_id,))
+            if not cursor.fetchone():
                 return jsonify({'error': 'Comment not found'}), 404
+
+            cursor.execute(
+                'SELECT 1 FROM comment_likes WHERE user_id = %s AND comment_id = %s',
+                (user['user_id'], comment_id)
+            )
+            liked = cursor.fetchone() is not None
+            if liked:
+                cursor.execute('DELETE FROM comment_likes WHERE user_id = %s AND comment_id = %s', (user['user_id'], comment_id))
+                cursor.execute('UPDATE comments SET likes = GREATEST(likes - 1, 0) WHERE id = %s', (comment_id,))
+            else:
+                cursor.execute('INSERT IGNORE INTO comment_likes (user_id, comment_id) VALUES (%s, %s)', (user['user_id'], comment_id))
+                cursor.execute('UPDATE comments SET likes = likes + 1 WHERE id = %s', (comment_id,))
+
             cursor.execute('SELECT likes FROM comments WHERE id = %s', (comment_id,))
-            return jsonify({'likes': cursor.fetchone()['likes']})
+            return jsonify({'likes': cursor.fetchone()['likes'], 'liked': not liked})
     finally:
         conn.close()
 
@@ -2422,12 +2501,134 @@ def forum_favorites():
     finally:
         conn.close()
 
+# ==================== 举报系统 API ====================
+
+REPORT_TARGET_TYPES = {'post', 'comment'}
+
+@app.route('/api/report', methods=['POST'])
+@login_required
+def submit_report():
+    data = request.get_json() or {}
+    target_type = (data.get('target_type') or '').strip()
+    target_id = data.get('target_id')
+    reason = (data.get('reason') or '').strip()
+
+    if target_type not in REPORT_TARGET_TYPES:
+        return jsonify({'error': '无效的举报对象类型'}), 400
+    if not target_id:
+        return jsonify({'error': '缺少举报对象ID'}), 400
+
+    user = g.current_user
+
+    # 校验目标存在
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            if target_type == 'post':
+                cursor.execute('SELECT id FROM posts WHERE id = %s', (target_id,))
+            else:
+                cursor.execute('SELECT id FROM comments WHERE id = %s', (target_id,))
+            if not cursor.fetchone():
+                return jsonify({'error': '举报对象不存在'}), 404
+
+            # 同一用户对同一对象 24 小时内不重复受理（防止骚扰刷屏）
+            cursor.execute(
+                '''SELECT id FROM reports
+                   WHERE reporter_id = %s AND target_type = %s AND target_id = %s
+                     AND created_at > (NOW() - INTERVAL 1 DAY)''',
+                (user['user_id'], target_type, str(target_id))
+            )
+            if cursor.fetchone():
+                return jsonify({'error': '您已举报过该内容，请勿重复举报'}), 409
+
+            cursor.execute(
+                'INSERT INTO reports (reporter_id, target_type, target_id, reason) VALUES (%s, %s, %s, %s)',
+                (user['user_id'], target_type, str(target_id), reason)
+            )
+            report_id = cursor.lastrowid
+            return jsonify({'success': True, 'id': report_id, 'message': '举报已提交，管理员将尽快处理'})
+    finally:
+        conn.close()
+
+@app.route('/api/reports', methods=['GET'])
+@role_required(ROLE_ADMIN)
+def list_reports():
+    page = int(request.args.get('page', 1))
+    page_size = int(request.args.get('pageSize', 20))
+    status = request.args.get('status', '')
+
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            where = []
+            params = []
+            if status in ('pending', 'resolved', 'dismissed'):
+                where.append('r.status = %s')
+                params.append(status)
+            where_sql = (' WHERE ' + ' AND '.join(where)) if where else ''
+
+            cursor.execute(
+                f'SELECT COUNT(*) AS total FROM reports r{where_sql}', params
+            )
+            total = cursor.fetchone()['total']
+
+            offset = (page - 1) * page_size
+            cursor.execute(
+                f'''SELECT r.id, r.target_type, r.target_id, r.reason, r.status, r.created_at,
+                           reporter.username AS reporter_name,
+                           handler.username AS handler_name,
+                           r.handled_at, r.note
+                    FROM reports r
+                    LEFT JOIN users reporter ON reporter.id = r.reporter_id
+                    LEFT JOIN users handler ON handler.id = r.handled_by
+                    {where_sql}
+                    ORDER BY r.created_at DESC
+                    LIMIT %s OFFSET %s''',
+                params + [page_size, offset]
+            )
+            reports = cursor.fetchall()
+            return jsonify({
+                'data': reports,
+                'total': total,
+                'page': page,
+                'pageSize': page_size
+            })
+    finally:
+        conn.close()
+
+@app.route('/api/reports/<int:report_id>', methods=['PUT'])
+@role_required(ROLE_ADMIN)
+def handle_report(report_id):
+    data = request.get_json() or {}
+    status = (data.get('status') or '').strip()
+    note = (data.get('note') or '').strip()
+
+    if status not in ('resolved', 'dismissed'):
+        return jsonify({'error': '无效的处理状态'}), 400
+
+    user = g.current_user
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                '''UPDATE reports SET status = %s, handled_by = %s, handled_at = NOW(), note = %s
+                   WHERE id = %s''',
+                (status, user['user_id'], note, report_id)
+            )
+            if cursor.rowcount == 0:
+                return jsonify({'error': '举报不存在'}), 404
+            log_action('handle_report', 'report', report_id, f'status={status}')
+            return jsonify({'success': True, 'message': '处理成功'})
+    finally:
+        conn.close()
+
 # ==================== 图片上传 API ====================
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 @app.route('/api/upload/image', methods=['POST'])
+@login_required
 def upload_image():
     if 'file' not in request.files:
         return jsonify({'error': '没有上传文件'}), 400
@@ -2504,6 +2705,7 @@ def fetch_peticon_from_web(race_id):
 @login_required
 def like_video(race_id, video_id):
     load_data()
+    user = g.current_user
     race_key = str(race_id)
     if race_key not in bilibili_videos:
         return jsonify({'error': '视频不存在'}), 404
@@ -2512,9 +2714,26 @@ def like_video(race_id, video_id):
     if not video:
         return jsonify({'error': '视频不存在'}), 404
 
-    video['likes'] = video.get('likes', 0) + 1
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                'SELECT 1 FROM video_likes WHERE user_id = %s AND race_id = %s AND video_id = %s',
+                (user['user_id'], race_id, video_id)
+            )
+            liked = cursor.fetchone() is not None
+            if liked:
+                cursor.execute('DELETE FROM video_likes WHERE user_id = %s AND race_id = %s AND video_id = %s',
+                               (user['user_id'], race_id, video_id))
+                video['likes'] = max((video.get('likes', 0) or 0) - 1, 0)
+            else:
+                cursor.execute('INSERT IGNORE INTO video_likes (user_id, race_id, video_id) VALUES (%s, %s, %s)',
+                               (user['user_id'], race_id, video_id))
+                video['likes'] = (video.get('likes', 0) or 0) + 1
+    finally:
+        conn.close()
     save_bilibili_videos()
-    return jsonify({'success': True, 'likes': video['likes']})
+    return jsonify({'success': True, 'likes': video['likes'], 'liked': not liked})
 
 @app.route('/api/videos/<int:race_id>/<string:video_id>/comments', methods=['GET'])
 def get_video_comments(race_id, video_id):
@@ -2722,12 +2941,39 @@ def backup_database():
     filename = f"aoqi_forum_{time.strftime('%Y%m%d_%H%M%S')}.sql"
     filepath = os.path.join(backup_dir, filename)
 
-    cmd = f"mysqldump -h {DB_CONFIG['host']} -P {DB_CONFIG['port']} -u {DB_CONFIG['user']} -p{DB_CONFIG['password']} {DB_CONFIG['database']} > {filepath}"
-    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    # 使用参数列表而非 shell 字符串，避免密码等含特殊字符时的命令注入
+    mysqldump_cmd = [
+        'mysqldump',
+        f"--host={DB_CONFIG['host']}",
+        f"--port={DB_CONFIG['port']}",
+        f"--user={DB_CONFIG['user']}",
+        f"--password={DB_CONFIG['password']}",
+        '--single-transaction',
+        '--routines',
+        '--triggers',
+        DB_CONFIG['database'],
+    ]
+    try:
+        with open(filepath, 'w', encoding='utf-8') as out:
+            result = subprocess.run(
+                mysqldump_cmd,
+                stdout=out,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+                shell=False,
+            )
+    except OSError as e:
+        return jsonify({'error': '备份失败（mysqldump 不可用）', 'detail': str(e)}), 500
+
     if result.returncode == 0:
         log_action('backup_database', detail=filename)
         return jsonify({'success': True, 'filename': filename})
-    return jsonify({'error': '备份失败', 'detail': result.stderr}), 500
+    try:
+        os.remove(filepath)
+    except OSError:
+        pass
+    return jsonify({'error': '备份失败', 'detail': result.stderr or '未知错误'}), 500
 
 if __name__ == '__main__':
     try:
@@ -2736,4 +2982,8 @@ if __name__ == '__main__':
     except Exception as e:
         print(f'Warning: Database init failed: {e}')
         print('Forum features will be disabled until MySQL is configured.')
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    # debug 默认关闭，避免生产环境暴露调试器；需要时通过 FLASK_DEBUG=1 开启
+    debug = os.environ.get('FLASK_DEBUG', '0') == '1'
+    # use_reloader 默认跟随 debug；可显式关闭以避免 Windows 下误监听导致请求中断
+    use_reloader = os.environ.get('FLASK_USE_RELOADER', '1' if debug else '0') == '1'
+    app.run(host='0.0.0.0', port=5000, debug=debug, use_reloader=use_reloader)

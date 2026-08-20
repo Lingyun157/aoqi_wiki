@@ -59,6 +59,7 @@
                         <button class="sidebar-action-btn" @click="toggleDarkMode" :title="darkMode ? '浅色模式' : '暗色模式'">{{ darkMode ? '☀️' : '🌙' }}</button>
 
                         <button class="sidebar-action-btn" v-if="checkIsAdmin()" @click="showAdminPanel = true; loadAdminUsers(1)" title="管理面板">🛡️</button>
+                        <button class="sidebar-action-btn" v-if="checkIsAdmin()" @click="showReports = true; loadReports(1)" title="举报处理">🚩</button>
                         <button class="sidebar-action-btn" v-if="checkIsSuperAdmin()" @click="showAuditLogs = true; loadAuditLogs(1)" title="操作日志">📋</button>
                         <button class="sidebar-action-btn" @click="showFormationSim = true" title="阵容模拟">🎮</button>
                         <button class="sidebar-action-btn" v-if="checkIsSuperAdmin()" @click="backupDatabase" title="数据库备份">💾</button>
@@ -772,9 +773,9 @@
                         <span v-else>生成中...</span>
                     </button>
                     
-                    <div class="modal-section" v-if="challengeDetail.rules && challengeDetail.rules.length">
+                    <div class="modal-section" v-if="(challengeDetail.rules && challengeDetail.rules.length) || (challengeDetail.entries && challengeDetail.entries.length)">
                         <h3>关卡规则</h3>
-                        <div class="rules-list">
+                        <div class="rules-list" v-if="challengeDetail.rules && challengeDetail.rules.length">
                             <div class="rule-item" v-for="(rule, idx) in challengeDetail.rules" :key="'rule-'+idx">
                                 <span class="rule-num">{{ idx + 1 }}</span>
                                 <span class="rule-text">{{ rule }}</span>
@@ -1061,6 +1062,47 @@
                 </div>
             </div>
 
+            <!-- 举报处理弹窗 -->
+            <div class="overlay" v-if="showReports" @click.self="showReports = false">
+                <div class="modal admin-modal reports-modal">
+                    <button class="modal-close" @click="showReports = false">
+                        <svg width="14" height="14" viewBox="0 0 14 14"><path d="M1 1L13 13M13 1L1 13" stroke="currentColor" stroke-width="1.5"/></svg>
+                    </button>
+                    <h2 class="modal-name">举报处理</h2>
+                    <div class="report-filter-bar">
+                        <span class="report-filter-item" :class="{ active: reportsStatusFilter === 'pending' }" @click="reportsStatusFilter = 'pending'; loadReports(1)">待处理</span>
+                        <span class="report-filter-item" :class="{ active: reportsStatusFilter === 'resolved' }" @click="reportsStatusFilter = 'resolved'; loadReports(1)">已处理</span>
+                        <span class="report-filter-item" :class="{ active: reportsStatusFilter === 'dismissed' }" @click="reportsStatusFilter = 'dismissed'; loadReports(1)">已驳回</span>
+                    </div>
+                    <div class="reports-list">
+                        <div class="report-item" v-for="r in reports" :key="r.id">
+                            <div class="report-item-header">
+                                <span class="report-type-tag">{{ r.target_type === 'post' ? '帖子' : '评论' }} #{{ r.target_id }}</span>
+                                <span class="report-status" :class="'status-' + r.status">{{ r.status === 'pending' ? '待处理' : r.status === 'resolved' ? '已处理' : '已驳回' }}</span>
+                                <span class="report-time">{{ formatTime(r.created_at) }}</span>
+                            </div>
+                            <div class="report-reason" v-if="r.reason">举报原因：{{ r.reason }}</div>
+                            <div class="report-item-footer">
+                                <span class="report-reporter" v-if="r.reporter_name">举报人：{{ r.reporter_name }}</span>
+                                <span class="report-handler" v-if="r.handler_name">处理人：{{ r.handler_name }}</span>
+                                <div class="report-actions" v-if="r.status === 'pending'">
+                                    <button class="btn btn-sm btn-danger" @click="handleReport(r.id, 'resolved')">确认违规</button>
+                                    <button class="btn btn-sm" @click="handleReport(r.id, 'dismissed')">驳回</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="empty-inline" v-if="reports.length === 0">
+                            <p>暂无{{ reportsStatusFilter === 'pending' ? '待处理' : reportsStatusFilter === 'resolved' ? '已处理' : '已驳回' }}举报</p>
+                        </div>
+                    </div>
+                    <div class="pagination" v-if="reportsTotal > 20">
+                        <button class="page-btn" :disabled="reportsPage <= 1" @click="loadReports(reportsPage - 1)">Prev</button>
+                        <span class="page-info">{{ reportsPage }} / {{ Math.ceil(reportsTotal / 20) }}</span>
+                        <button class="page-btn" :disabled="reportsPage >= Math.ceil(reportsTotal / 20)" @click="loadReports(reportsPage + 1)">Next</button>
+                    </div>
+                </div>
+            </div>
+
             <!-- 个人主页弹窗 -->
             <div class="overlay" v-if="showUserProfile" @click.self="showUserProfile = false">
                 <div class="modal profile-modal">
@@ -1074,14 +1116,22 @@
                         </div>
                         <div class="profile-info">
                             <h2 class="profile-name">{{ profileUser.username }}</h2>
-                            <span class="role-badge" :class="'role-' + (profileUser.role === 'super_admin' ? 'super' : profileUser.role === 'admin' ? 'admin' : 'user')">
-                                {{ profileUser.role === 'super_admin' ? '超级管理员' : profileUser.role === 'admin' ? '管理员' : '普通用户' }}
-                            </span>
+                            <div class="profile-badges">
+                                <span class="role-badge" :class="'role-' + (profileUser.role === 'super_admin' ? 'super' : profileUser.role === 'admin' ? 'admin' : 'user')">
+                                    {{ profileUser.role === 'super_admin' ? '超级管理员' : profileUser.role === 'admin' ? '管理员' : '普通用户' }}
+                                </span>
+                                <span class="level-badge" v-if="profileUser.level">Lv.{{ profileUser.level }}</span>
+                                <span class="points-badge" v-if="profileUser.points">{{ profileUser.points }} 积分</span>
+                            </div>
+                            <div class="profile-stats" v-if="profileUser.post_count !== undefined">
+                                <span>帖子 {{ profileUser.post_count }}</span>
+                                <span>评论 {{ profileUser.comment_count }}</span>
+                            </div>
                         </div>
                     </div>
                     <div class="profile-tabs">
-                        <div class="profile-tab" :class="{ active: currentProfileTab === 'posts' }" @click="currentProfileTab = 'posts'">帖子 ({{ profilePosts.length }})</div>
-                        <div class="profile-tab" :class="{ active: currentProfileTab === 'comments' }" @click="currentProfileTab = 'comments'">评论 ({{ profileComments.length }})</div>
+                        <div class="profile-tab" :class="{ active: currentProfileTab === 'posts' }" @click="switchProfileTab('posts')">帖子 ({{ profilePosts.length }})</div>
+                        <div class="profile-tab" :class="{ active: currentProfileTab === 'comments' }" @click="switchProfileTab('comments')">评论 ({{ profileComments.length }})</div>
                     </div>
                     <div class="profile-content">
                         <div v-if="currentProfileTab === 'posts'" class="profile-posts">
