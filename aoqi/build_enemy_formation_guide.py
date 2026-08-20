@@ -191,6 +191,8 @@ def scan_challenges(activities_root):
                 pet_race_id = parse_js_value(content, 'DESIRED_RACE_ID', 'int')
             total_lv = parse_js_value(content, 'TotalLv', 'int')
             rules = parse_js_string_array(content, 'RULES')
+            if not rules:
+                rules = parse_js_string_array(content, 'RULE_CONFIG')
             entries = parse_js_string_array(content, 'ENTRIES')
             level_structure = parse_level_desc_structure(content)
 
