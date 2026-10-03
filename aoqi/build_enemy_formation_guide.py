@@ -34,6 +34,39 @@ def parse_js_string_array(text, field_name):
     return _RE_ARRAY_ITEMS.findall(m.group(1))
 
 
+# 按关键词匹配所有包含该关键词的字符串数组字段
+# 兼容字段名变化（RULES / RULE_CONFIG / BASE_RULES / BUFF_RULES / ENTRY / ENTRIES 等）
+_RE_KEYWORD_ARRAY = re.compile(
+    r'\.([A-Za-z_]*RULE[A-Za-z_]*|[A-Za-z_]*ENTRI[A-Za-z_]*)\s*=\s*\[((?:"[^"]*"(?:\s*,\s*"[^"]*")*)\s*)\]',
+    re.IGNORECASE,
+)
+
+def parse_js_string_arrays_by_keyword(text, keywords=('RULE', 'ENTRI')):
+    """
+    在 JS 文本中查找所有字段名包含任一关键词的字符串数组赋值，
+    返回按关键词分类的结果字典。
+    例如 keywords=('RULE','ENTRI') 时，会返回：
+    {'rule': [...], 'entri': [...]}
+    使用 'ENTRI' 可同时匹配 ENTRY 和 ENTRIES 两种字段名。
+    """
+    result = {kw.lower(): [] for kw in keywords}
+    for m in _RE_KEYWORD_ARRAY.finditer(text):
+        field_name = m.group(1).upper()
+        array_content = m.group(2)
+        items = _RE_ARRAY_ITEMS.findall(array_content)
+        # 按关键词归类，优先匹配 ENTRI，其次 RULE
+        matched_kw = None
+        for kw in keywords:
+            if kw.upper() in field_name:
+                matched_kw = kw
+                break
+        if matched_kw:
+            for item in items:
+                if item and item not in result[matched_kw.lower()]:
+                    result[matched_kw.lower()].append(item)
+    return result
+
+
 def parse_js_value(text, field_name, value_type='int'):
     if value_type == 'int':
         m = re.search(rf'\.{re.escape(field_name)}\s*=\s*(\d+)', text)
@@ -190,10 +223,10 @@ def scan_challenges(activities_root):
             if pet_race_id is None:
                 pet_race_id = parse_js_value(content, 'DESIRED_RACE_ID', 'int')
             total_lv = parse_js_value(content, 'TotalLv', 'int')
-            rules = parse_js_string_array(content, 'RULES')
-            if not rules:
-                rules = parse_js_string_array(content, 'RULE_CONFIG')
-            entries = parse_js_string_array(content, 'ENTRIES')
+            # 按关键词匹配规则字段，兼容字段名变化（RULES/RULE_CONFIG/BASE_RULES/BUFF_RULES/ENTRY/ENTRIES等）
+            keyword_results = parse_js_string_arrays_by_keyword(content, ('RULE', 'ENTRI'))
+            rules = keyword_results.get('rule', [])
+            entries = keyword_results.get('entri', [])
             level_structure = parse_level_desc_structure(content)
 
             # 如果没有解析到 levelStructure，自动生成默认的：每个 teamId 一个关卡
