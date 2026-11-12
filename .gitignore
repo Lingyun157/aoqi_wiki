@@ -1,0 +1,14 @@
+# 用户提供的素材与密钥：不入库
+*.pak
+*.ubulk
+wuwa-keys-main/
+keys.json
+
+# 运行产物
+output/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+paktex_test_*/
+*.png

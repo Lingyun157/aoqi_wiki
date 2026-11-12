@@ -1,0 +1,8 @@
+# 运行 paktex 所需（本地 D:\miniconda 已具备）
+Pillow>=9.3
+numpy>=1.24
+pycryptodomex>=3.17
+
+# 可选：解码 ASTC / ETC / PVRTC 及加速 BCn 解码。
+# 缺失时 BC1~BC7 会自动回退到 Pillow 自带的 DDS/BCn 解码器。
+texture2ddecoder>=1.0
