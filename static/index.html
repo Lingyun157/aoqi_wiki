@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Frame Studio · 帧工坊</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark"><span></span><span></span><span></span></div>
+      <div>
+        <div class="brand-title">帧工坊 <small>Frame Studio</small></div>
+        <div class="brand-sub">视频 / 动图拆帧 · 补帧 · 帧替换</div>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <div class="env-pill" id="envPill"><i></i><span>检测环境中…</span></div>
+      <button class="icon-btn" id="themeBtn" title="切换主题">◐</button>
+      <button class="icon-btn" id="cleanupBtn" title="清理未使用的临时素材">清理缓存</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="side-head">
+        <h3>项目</h3>
+        <button class="text-btn" id="newProjectBtn">＋ 新拆帧</button>
+      </div>
+      <div id="projectList" class="project-list"><div class="empty-side">暂无项目</div></div>
+      <div class="side-foot">
+        <div class="side-note">所有素材与帧序列都保存在本机 D 盘 workspace 目录，不上传云端。</div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="steps">
+        <div class="step active" data-step="1"><b>1</b><span>导入素材</span></div>
+        <div class="step-line"></div>
+        <div class="step" data-step="2"><b>2</b><span>设置并拆帧</span></div>
+        <div class="step-line"></div>
+        <div class="step" data-step="3"><b>3</b><span>补帧 / 替换</span></div>
+        <div class="step-line"></div>
+        <div class="step" data-step="4"><b>4</b><span>导出</span></div>
+      </div>
+
+      <!-- 1. 导入 -->
+      <section class="card" id="importCard">
+        <div class="card-head"><h2>导入素材</h2><span class="card-hint">支持 mp4 / mov / mkv / webm / gif / apng / webp 及静态图</span></div>
+        <div class="dropzone" id="dropzone">
+          <div class="dz-icon">
+            <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4m0 0L8 8m4-4 4 4"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
+          </div>
+          <div class="dz-title">拖拽视频或动图到这里，或点击选择文件</div>
+          <div class="dz-sub">大文件也可以，上传与拆帧全程在本机完成</div>
+          <input type="file" id="fileInput" accept="video/*,image/*,.gif,.apng,.webp,.mkv,.mov" hidden>
+        </div>
+        <div id="uploadProgress" class="progress-wrap hidden"><div class="progress-bar"><i id="uploadBar"></i></div><span id="uploadText"></span></div>
+        <div id="probeBox" class="probe-box hidden"></div>
+      </section>
+
+      <!-- 2. 拆帧参数 -->
+      <section class="card" id="extractCard">
+        <div class="card-head"><h2>拆帧设置</h2><span class="card-hint" id="estimateHint">导入素材后自动计算预计帧数</span></div>
+        <div class="form-grid">
+          <div class="field">
+            <label>帧率模式</label>
+            <div class="segment" id="fpsMode">
+              <button class="seg active" data-value="source">沿用原始帧率</button>
+              <button class="seg" data-value="custom">自定义帧率</button>
+            </div>
+          </div>
+          <div class="field">
+            <label>目标帧率 <span class="unit">fps</span></label>
+            <input type="number" id="fpsInput" min="1" max="240" step="0.001" value="24" disabled>
+          </div>
+          <div class="field">
+            <label>输出格式</label>
+            <select id="formatInput">
+              <option value="png">PNG · 无损（推荐用于补帧）</option>
+              <option value="jpg">JPG · 体积小</option>
+              <option value="webp">WebP · 体积与质量平衡</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>缩放宽度 <span class="unit">0 = 保持原尺寸</span></label>
+            <input type="number" id="scaleInput" min="0" max="7680" step="2" value="0">
+          </div>
+          <div class="field">
+            <label>起始时间 <span class="unit">秒</span></label>
+            <input type="number" id="startInput" min="0" step="0.1" value="0">
+          </div>
+          <div class="field">
+            <label>结束时间 <span class="unit">留空 = 到结尾</span></label>
+            <input type="number" id="endInput" min="0" step="0.1" placeholder="自动">
+          </div>
+          <div class="field">
+            <label>最大帧数 <span class="unit">0 = 不限制</span></label>
+            <input type="number" id="maxInput" min="0" step="1" value="0">
+          </div>
+          <div class="field">
+            <label>项目名称</label>
+            <input type="text" id="nameInput" placeholder="默认使用素材文件名">
+          </div>
+        </div>
+        <div class="estimate-strip" id="estimateStrip">
+          <div class="est-left"><span class="est-label">预计输出</span><strong id="estFrames">—</strong><span class="est-unit">张图片</span></div>
+          <div class="est-formula" id="estFormula">帧率 × 时长 = 帧数</div>
+        </div>
+        <div id="extractProgress" class="progress-wrap hidden"><div class="progress-bar"><i id="extractBar"></i></div><span id="extractText"></span></div>
+        <div class="actions">
+          <button class="primary-btn" id="extractBtn" disabled>开始拆帧</button>
+          <button class="ghost-btn hidden" id="cancelBtn">取消任务</button>
+          <span class="actions-tip" id="extractTip">先导入素材</span>
+        </div>
+      </section>
+
+      <!-- 3. 帧工作台 -->
+      <section class="card hidden" id="framesCard">
+        <div class="card-head">
+          <h2>帧序列工作台</h2>
+          <span class="card-hint" id="framesMeta"></span>
+        </div>
+        <div class="toolbar">
+          <button class="tool-btn" id="selectAllBtn">全选本页</button>
+          <button class="tool-btn" id="clearSelBtn">取消选择</button>
+          <span class="tool-sep"></span>
+          <button class="tool-btn" id="replaceBtn">替换选中帧</button>
+          <button class="tool-btn" id="insertBtn">后方插入补帧</button>
+          <button class="tool-btn accent" id="doubleBtn" title="每帧后插入一张占位帧，帧数翻倍，导出时帧率同步加倍">整段插帧 ×2</button>
+          <button class="tool-btn danger" id="deleteBtn">删除选中帧</button>
+          <span class="tool-sep"></span>
+          <button class="tool-btn" id="undoBtn">撤销</button>
+          <button class="tool-btn" id="restoreBtn">还原原始帧</button>
+          <input type="file" id="frameFileInput" accept="image/*" hidden>
+        </div>
+        <div class="selection-hint" id="selectionHint">单击缩略图查看大图，点右上角方框勾选；补帧后记得替换成插帧结果。</div>
+        <div id="frameGrid" class="frame-grid"></div>
+        <div class="pager" id="pager"></div>
+      </section>
+
+      <!-- 4. 导出 -->
+      <section class="card hidden" id="exportCard">
+        <div class="card-head"><h2>导出成果</h2><span class="card-hint">按当前帧序列顺序合成，替换与补帧都会生效</span></div>
+        <div class="export-row">
+          <div class="field inline">
+            <label>合成帧率 <span class="unit">fps</span></label>
+            <input type="number" id="exportFps" min="1" max="240" step="0.001" value="24">
+          </div>
+          <div class="export-btns">
+            <button class="primary-btn" data-export="mp4">合成 MP4</button>
+            <button class="ghost-btn" data-export="gif">导出 GIF</button>
+            <button class="ghost-btn" data-export="zip">打包帧序列 ZIP</button>
+          </div>
+        </div>
+        <div id="exportProgress" class="progress-wrap hidden"><div class="progress-bar"><i id="exportBar"></i></div><span id="exportText"></span></div>
+        <div class="export-list" id="exportList"></div>
+      </section>
+    </main>
+  </div>
+
+  <footer class="statusbar"><span id="statusText">就绪</span><span id="workspaceText"></span></footer>
+</div>
+
+<!-- 大图预览 -->
+<div class="modal hidden" id="previewModal">
+  <div class="modal-backdrop" id="modalBackdrop"></div>
+  <div class="modal-panel">
+    <div class="modal-head">
+      <div><strong id="previewTitle">帧预览</strong><span id="previewSub"></span></div>
+      <button class="icon-btn" id="closePreview">✕</button>
+    </div>
+    <div class="modal-body">
+      <button class="nav-btn" id="prevFrame">‹</button>
+      <img id="previewImg" alt="帧预览">
+      <button class="nav-btn" id="nextFrame">›</button>
+    </div>
+    <div class="modal-foot">
+      <span id="previewInfo"></span>
+      <button class="ghost-btn" id="previewReplace">替换为本地图片</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
